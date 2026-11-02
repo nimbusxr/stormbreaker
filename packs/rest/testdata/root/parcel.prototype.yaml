@@ -1,0 +1,11 @@
+data:
+  country: DE
+  serviceLevel: STANDARD
+metadata:
+  path:
+    reference:
+      $ref: "#/reference"
+  headers:
+    X-Requested-By: load-suite
+  query:
+    source: stormbreaker

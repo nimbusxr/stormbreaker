@@ -1,0 +1,25 @@
+{/* Apply the saved choice before the page paints; dark is the default. */}
+<script is:inline>
+	window.SbTheme = (() => {
+		const storageKey = 'starlight-theme';
+		const apply = (theme) => {
+			document.documentElement.dataset.theme = theme;
+			document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#e3e8f0' : '#070b14');
+			window.dispatchEvent(new Event('sb:theme-change'));
+		};
+		let initial = 'dark';
+		try {
+			if (localStorage.getItem(storageKey) === 'light') initial = 'light';
+		} catch { /* The toggle also works when storage is unavailable. */ }
+		apply(initial);
+		window.addEventListener('storage', (event) => {
+			if (event.key === storageKey || event.key === null) apply(event.newValue === 'light' ? 'light' : 'dark');
+		});
+		return {
+			set(theme) {
+				apply(theme);
+				try { localStorage.setItem(storageKey, theme); } catch { /* Keep the current page usable. */ }
+			},
+		};
+	})();
+</script>

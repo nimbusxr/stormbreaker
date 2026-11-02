@@ -1,0 +1,51 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # No cache: this job publishes the rolling nightly release.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: "go goreleaser"
+          cache: false
+      - run: GORELEASER_CURRENT_TAG=$(scripts/cli-tag.sh) goreleaser release --snapshot --clean --skip=docker,homebrew,sign,sbom
+      # The rolling release waits for the STORMBREAKER_PUBLISH repository variable, like every release;
+      # until then the build is kept on the run.
+      - if: vars.STORMBREAKER_PUBLISH != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: stormbreaker-nightly
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          retention-days: 7
+      - name: publish rolling nightly pre-release
+        if: vars.STORMBREAKER_PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view nightly >/dev/null 2>&1 || \
+            gh release create nightly --prerelease --title "nightly" --notes "Rolling build of main. Not for production use."
+          gh release upload nightly dist/*.tar.gz dist/*.zip dist/checksums.txt --clobber
+          # Each build names its archives after itself: remove the earlier builds' ones,
+          # which checksums.txt no longer lists.
+          keep=$(cd dist && printf '%s\n' ./*.tar.gz ./*.zip checksums.txt | sed 's|^\./||')
+          gh release view nightly --json assets --jq '.assets[].name' | while read -r name; do
+            printf '%s\n' "$keep" | grep -qxF "$name" || gh release delete-asset nightly "$name" --yes
+          done

@@ -1,0 +1,40 @@
+# build output
+/bin/
+/dist/
+/build/*
+!/build/*.Dockerfile
+coverage.out
+coverage.txt
+coverage.html
+*.test
+
+# axx runtime state, and the orchestrator's local database
+.axx/
+/data/
+
+# editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# local-only config overlays and agent settings
+axx.local.yaml
+**/.claude/settings.local.json
+
+# docs site
+docs/node_modules/
+docs/dist/
+docs/.astro/
+
+# agent worktrees
+.claude/worktrees/
+
+# docs: what scripts/gen.mjs generates
+docs/src/content/docs/references/_gen/
+docs/src/lib/_gen/
+docs/public/openapi/
+docs/public/install.sh
+
+# the UI's build tools
+ui/node_modules/

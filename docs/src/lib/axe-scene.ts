@@ -1,0 +1,418 @@
+/** One continuous flight shot, drawn in ink and sampled into ASCII. */
+import { DEFAULT_AXE_POSE } from './axe-pose.mjs';
+export type AxePoseSettings = typeof DEFAULT_AXE_POSE;
+// Times are relative to the start of the throw, including the title contact.
+/** The point on the axe's head its lightning radiates from. */
+const STRIKE: Point = [70, -75];
+export const AXE_FLIGHT = { impact: 1.6, spinEnd: 1.7, arrival: 2.1, orbitStart: .85, orbitEnd: 2.45 };
+const SPIN_BRAKING_FRACTION = .45;
+
+const clamp = (n: number, min = 0, max = 1) => Math.max(min, Math.min(max, n));
+const ease = (n: number) => { const t = clamp(n); return t * t * (3 - 2 * t); };
+const settleEase = (n: number) => { const t = clamp(n); return t * t * t * (t * (t * 6 - 15) + 10); };
+const mix = (a: number, b: number, p: number) => a + (b - a) * p;
+const noise = (n: number) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+const gray = (n: number) => { const v = Math.round(n); return `rgb(${v} ${v} ${v})`; };
+/**
+ * What a surface is made of, carried in blue against red (red is its tone, green equals red so
+ * it never reads as a streak): wood's blue is above its red, the grip's wrap's twice as far
+ * above, the head's paint's below, steel's the same. The player colors each character by it
+ * (AsciiAxe.astro).
+ */
+export type Material = 'steel' | 'wood' | 'wrap' | 'paint';
+export const MATERIAL_OFFSET = 48;
+const OFFSETS: Record<Material, number> = { steel: 0, wood: MATERIAL_OFFSET, wrap: MATERIAL_OFFSET * 2, paint: -MATERIAL_OFFSET };
+const tinted = (n: number, material: Material) => {
+ const v = Math.round(n);
+ if (material === 'steel') return gray(v);
+ return `rgb(${v} ${v} ${Math.max(0, Math.min(255, v + OFFSETS[material]))})`;
+};
+type Point = [number, number, number?];
+type Vector = [number, number, number];
+type Pose = { x: number; y: number; scale: number; face: number; roll: number; bend: number; pitch?: number; tumble?: number; yaw?: number; cant?: number; orbit?: number };
+type Key = Pick<Pose, 'scale' | 'face' | 'roll' | 'bend'> & { at: number };
+
+// Pitch tips the head toward the lens; roll is only the slight lean within the frame.
+const FORWARD_PITCH = 1.04;
+const CAMERA_DISTANCE = 520;
+const HERO: Pose = { x: 0, y: 0, scale: 1, face: .46, roll: .16, bend: 0, pitch: 1.52 };
+const HAFT_EYE: Point = [-3, -116];
+const HAFT_GRIP: Point = [-24, 300];
+const ORBIT_FOCUS: Point = [18, -48];
+const ORBIT_ANGLE = 25 * Math.PI / 180;
+// Depth controls the entrance along the same ray the handle follows after the spin.
+const APPROACH: Key[] = [
+ { at: 0, scale: .025, face: .49, roll: HERO.roll - .07, bend: 0 },
+ { at: .3, scale: .04, face: .49, roll: HERO.roll - .07, bend: -1 },
+ { at: .62, scale: .08, face: .485, roll: HERO.roll - .06, bend: -2 },
+ { at: .94, scale: .18, face: .48, roll: HERO.roll - .04, bend: -4 },
+ { at: 1.22, scale: .39, face: .475, roll: HERO.roll - .01, bend: -8 },
+ { at: 1.48, scale: .74, face: .46, roll: HERO.roll + .03, bend: -12 },
+ { at: AXE_FLIGHT.spinEnd, scale: 1.03, face: .45, roll: HERO.roll + .03, bend: -6 },
+ { at: 1.9, scale: .994, face: .465, roll: HERO.roll - .01, bend: 3 },
+ { at: AXE_FLIGHT.arrival, ...HERO },
+];
+function poseAt(time: number): Pose {
+ const b = APPROACH.findIndex(k => k.at > time);
+ if (b === 0) return { ...APPROACH[0], x: 0, y: 0 };
+ if (b < 0) return HERO;
+ const a = APPROACH[b - 1], next = APPROACH[b], p = (time - a.at) / (next.at - a.at);
+ return { x: 0, y: 0, scale: mix(a.scale, next.scale, p), face: mix(a.face, next.face, p), roll: mix(a.roll, next.roll, p), bend: mix(a.bend, next.bend, p) };
+}
+
+function throwSpin(time: number): number {
+ const p = clamp(time / AXE_FLIGHT.spinEnd);
+ if (p === 1) return 0;
+ // One complete turn. Brake while still approaching and finish at the depth
+ // overshoot, so no rotation remains once the axe is holding near the viewer.
+ const brakingDuration = 1 - SPIN_BRAKING_FRACTION;
+ const braking = clamp((p - SPIN_BRAKING_FRACTION) / brakingDuration);
+ // Integral of 1 - smoothstep: continuous speed and acceleration at both ends.
+ const brakingTravel = braking - braking ** 3 + braking ** 4 / 2;
+ const travel = p < SPIN_BRAKING_FRACTION ? p : SPIN_BRAKING_FRACTION + brakingDuration * brakingTravel;
+ return Math.PI * 2 * travel / (SPIN_BRAKING_FRACTION + brakingDuration / 2);
+}
+
+const HEAD: Point[] = [
+ [-30, -135], [12, -139], [44, -146], [82, -160], [117, -160],
+ [128, -142], [138, -110], [141, -78], [137, -43], [124, -10],
+ [107, 12], [87, 8], [78, -15], [74, -43], [58, -68], [29, -83], [-29, -86],
+];
+// A long haft: a hand's width under the head, then most of an arm's length to the pommel.
+const HAFT: Point[] = [
+ [-9, -144], [8, -144], [12, -103], [9, -28], [2, 60], [-8, 150], [-14, 236], [-17, 300],
+ [-32, 302], [-37, 238], [-33, 150], [-24, 60], [-14, -30], [-14, -104],
+];
+// A steel cap on the haft's end.
+const POMMEL: Point[] = [[-12, 296], [-38, 298], [-43, 313], [-37, 330], [-15, 332], [-8, 315]];
+// Where lightning leaves the head: its blade, mostly.
+const ARC_ROOTS: Point[] = [[117, -160], [128, -142], [138, -110], [141, -78], [137, -43], [124, -10], [107, 12], [82, -160]];
+function cameraPoint([x, y, z = 0]: Point, pose: Pose, drag = 0): Vector {
+ const cy = pose.yaw === undefined ? pose.face : Math.cos(pose.yaw);
+ const sy = pose.yaw === undefined ? Math.sqrt(1 - pose.face * pose.face) : Math.sin(pose.yaw);
+ const yawDepth = -x * sy + z * cy;
+ const pitch = pose.pitch ?? FORWARD_PITCH;
+ const cp = Math.cos(pitch), sp = Math.sin(pitch);
+ const px = x * cy + z * sy + drag, py = y * cp - yawDepth * sp;
+ const c = Math.cos(pose.roll), s = Math.sin(pose.roll);
+ const rx = px * c - py * s, ry = px * s + py * c, depth = y * sp + yawDepth * cp;
+ const cc = Math.cos(pose.cant ?? 0), cs = Math.sin(pose.cant ?? 0);
+ return [rx * cc + depth * cs, ry, depth * cc - rx * cs];
+}
+// Moving the camera to its left rotates the view to the right about a fixed
+// focus on the axe. The tracked focus stays put; the blade and haft gain parallax.
+function orbitVector([x, y, z]: Vector, angle: number): Vector {
+ const c = Math.cos(angle), s = Math.sin(angle);
+ return [x * c - z * s, y, x * s + z * c];
+}
+function viewPoint(point: Point, pose: Pose, drag = 0): Vector {
+ const projected = cameraPoint(point, pose, drag);
+ if (!pose.orbit) return projected;
+ const pivot = cameraPoint(ORBIT_FOCUS, pose);
+ const rotated = orbitVector([projected[0] - pivot[0], projected[1] - pivot[1], projected[2] - pivot[2]], pose.orbit);
+ return [rotated[0] + pivot[0], rotated[1] + pivot[1], rotated[2] + pivot[2]];
+}
+function mapPoint([x, y, z = 0]: Point, pose: Pose): Point {
+ // Secondary motion lives in the drawing: the haft drags, whips, and springs back.
+ const drag = pose.bend * Math.pow(clamp((y + 60) / 392), 2);
+ if (pose.tumble) {
+  // End-over-end around the head-heavy balance point, in the blade's plane.
+  // Project afterward so the head and grip visibly trade near/far positions.
+  const dx = x - 18, dy = y + 48;
+  const c = Math.cos(pose.tumble), s = Math.sin(pose.tumble);
+  x = 18 + dx * c - dy * s;
+  y = -48 + dx * s + dy * c;
+ }
+ // Yaw presents the cutting edge. Pitch rotates in depth: the head comes closer
+ // and the grip recedes, becoming shorter and smaller through perspective.
+ const [px, py, depth] = viewPoint([x, y, z], pose, drag);
+ const perspective = CAMERA_DISTANCE / (CAMERA_DISTANCE + depth);
+ return [pose.x + px * perspective * pose.scale, pose.y + py * perspective * pose.scale];
+}
+// Center the complete silhouette, rather than its handle pivot.
+const silhouette = [...HEAD, ...HAFT, ...POMMEL].map(p => mapPoint(p, HERO));
+const left = Math.min(...silhouette.map(p => p[0])), right = Math.max(...silhouette.map(p => p[0]));
+const top = Math.min(...silhouette.map(p => p[1])), bottom = Math.max(...silhouette.map(p => p[1]));
+const ART_CENTER: Point = [(left + right) / 2, (top + bottom) / 2];
+function framePoint(point: Point, pose: Pose): Point {
+ const [x, y] = mapPoint(point, pose);
+ return [x - ART_CENTER[0] * pose.scale, y - ART_CENTER[1] * pose.scale];
+}
+function selectedPose(settings: AxePoseSettings, width: number, height: number, artScale: number): Pose {
+ const radians = Math.PI / 180;
+ return {
+  ...HERO,
+  pitch: HERO.pitch! + settings.pitch * radians,
+  yaw: Math.acos(HERO.face) + settings.yaw * radians,
+  cant: settings.cant * radians,
+  roll: HERO.roll + settings.roll * radians,
+  x: settings.x / 100 * width / artScale,
+  y: settings.y / 100 * height / artScale,
+  scale: settings.scale,
+ };
+}
+// The entrance and wind share the haft's vanishing point. Carry that direction
+// through the camera move too, so the air never slips away from the flight axis.
+function throwOrigin(pose: Pose): Point {
+ const axis = orbitVector(cameraPoint([HAFT_GRIP[0] - HAFT_EYE[0], HAFT_GRIP[1] - HAFT_EYE[1]], pose), pose.orbit ?? 0);
+ // Only the editor can turn the haft exactly side-on to the camera.
+ const depth = Math.abs(axis[2]) < .01 ? (axis[2] < 0 ? -.01 : .01) : axis[2];
+ return [
+  pose.x + (CAMERA_DISTANCE * axis[0] / depth - ART_CENTER[0]) * pose.scale,
+  pose.y + (CAMERA_DISTANCE * axis[1] / depth - ART_CENTER[1]) * pose.scale,
+ ];
+}
+
+/**
+ * The axe's scene. With fx, the lightning around it draws on a layer of its own (axe-ascii.ts):
+ * its brightness in blue, and the direction of its stroke in green, for a glyph that follows it.
+ */
+export function createAxeScene(ink: CanvasRenderingContext2D, fx?: CanvasRenderingContext2D) {
+ const polygon = (points: Point[], tone: number, stroke = 0, width = 0, material: Material = 'steel') => {
+  ink.beginPath(); points.forEach(([x, y], i) => i ? ink.lineTo(x, y) : ink.moveTo(x, y));
+  ink.closePath(); ink.fillStyle = tinted(tone, material); ink.fill();
+  if (width) { ink.strokeStyle = tinted(stroke, material); ink.lineWidth = width; ink.lineJoin = 'round'; ink.stroke(); }
+ };
+ const line = (points: Point[], tone: number, width = 2, directional = false, material: Material = 'steel') => {
+  ink.beginPath(); points.forEach(([x, y], i) => i ? ink.lineTo(x, y) : ink.moveTo(x, y));
+  // Color encodes a glyph direction only. The player always displays neutral gray.
+  const a = points[0], b = points[points.length - 1], dx = b[0] - a[0], dy = b[1] - a[1];
+  const direction = Math.abs(dy) < Math.abs(dx) * .35 ? 0 : Math.abs(dx) < Math.abs(dy) * .35 ? .9 : dx * dy < 0 ? .3 : .6;
+  ink.strokeStyle = directional ? `rgb(${tone} 0 ${Math.round(tone * direction)})` : tinted(tone, material);
+  ink.lineWidth = width; ink.lineCap = 'round'; ink.stroke();
+ };
+ const axe = (pose: Pose, silhouette = false) => {
+  const map = (p: Point) => framePoint(p, pose);
+  // A shallow forged body, thickest at the socket and tapered at the cutting
+  // edge, gives the head weight even when the camera sees it almost edge-on.
+  const thickness = ([x]: Point) => mix(6.5, 1, ease((x - 15) / 120));
+  const normal = orbitVector(cameraPoint([0, 0, 1], pose), pose.orbit ?? 0);
+  const face = normal[2] > 0 ? -1 : 1;
+  const surface = (p: Point, side: number): Point => [p[0], p[1], thickness(p) * side];
+  const head = (p: Point[]) => p.map(p => map(surface(p, face)));
+  const weight = Math.max(2, pose.scale * 3);
+  // A wooden handle, its grip wrapped; a steel head with a red strip along its top, out to the blade.
+  polygon(HAFT.map(map), silhouette ? 44 : 141, 18, weight, silhouette ? 'steel' : 'wood');
+  polygon(POMMEL.map(map), silhouette ? 50 : 150, 20, weight);
+  if (!silhouette) {
+   line([[-3, -120], [-3, -27], [-8, 60], [-16, 150], [-22, 236], [-24, 292]].map(p => map(p as Point)), 179, weight * 1.7, false, 'wood');
+   // The grip: a wrapped hand's length above the pommel.
+   for (let y = 196; y < 292; y += 13) {
+    const x = -20 - (y - 196) * .03;
+    line([[x - 14, y], [x + 6, y - 5]].map(p => map(p as Point)), 140, weight * 1.9, false, 'wrap');
+   }
+   line([[-36, 304], [-12, 300]].map(p => map(p as Point)), 205, weight * 1.4);
+  }
+  polygon(HEAD.map(p => map(surface(p, -face))), silhouette ? 44 : 78, 16, weight);
+  const rim = HEAD.map((a, index) => {
+   const b = HEAD[(index + 1) % HEAD.length];
+   const points = [surface(a, -1), surface(b, -1), surface(b, 1), surface(a, 1)];
+   return { points, depth: points.reduce((sum, p) => sum + viewPoint(p, pose)[2], 0) / 4, index };
+  }).sort((a, b) => b.depth - a.depth);
+  // The rim's first five faces are the head's top, from the eye out to the blade.
+  for (const { points, index } of rim) polygon(points.map(map), silhouette ? 50 : index < 5 ? 158 : 92, 24, weight * .4, !silhouette && index < 5 ? 'paint' : 'steel');
+  polygon(head(HEAD), silhouette ? 55 : 126, 16, weight * 2);
+  if (silhouette) return;
+  // Flat ink shadows and a broad curved bevel replace smoothly shaded mesh facets.
+  polygon(head([[-29, -128], [22, -127], [66, -135], [83, -114], [63, -84], [29, -88], [-29, -91]]), 69);
+  const bevel: Point[] = [...HEAD.slice(3, 12), [94, -7], [109, -32], [121, -75], [117, -118], [101, -145], [82, -151]];
+  polygon(head(bevel), 203);
+  line(head(HEAD.slice(4, 11)), 237, weight * 1.7);
+  line(head([[22, -114], [43, -93], [63, -118], [84, -91]]), 51, weight);
+  line(head([[24, -100], [44, -126], [64, -99], [84, -122]]), 51, weight);
+  line(head([[-27, -136], [12, -138], [45, -145], [82, -160], [112, -159]]), 179, weight);
+ };
+
+ // A whirlwind around the flight axis: streaks spiral in toward the vanishing point, turning
+ // faster the closer they get, and the whole storm wheels slowly as it goes.
+ const wind = (time: number, strength: number, width: number, height: number, artScale: number, origin: Point) => {
+  const center: Point = [width / 2 + origin[0] * artScale, height / 2 + origin[1] * artScale];
+  const reach = Math.hypot(width, height) * .72;
+  const inner = artScale * 70;
+  const at = (angle: number, r: number): Point => [center[0] + Math.cos(angle) * r, center[1] + Math.sin(angle) * r];
+  for (let i = 0; i < 132; i++) {
+   // Looking back at the approaching axe, air recedes toward the vanishing point.
+   const phase = 1 - (noise(i + 31) + time * (.3 + noise(i + 41) * .26)) % 1;
+   const radius = inner + phase * reach;
+   const tail = radius + artScale * (90 + noise(i + 11) * 230);
+   const twist = 1.5 + noise(i + 17) * .9;
+   const angle = (r: number) => noise(i + 7) * Math.PI * 2 + time * .7 + twist * Math.log(reach / r);
+   ink.save(); ink.globalAlpha = strength * Math.sin(phase * Math.PI) * (.55 + noise(i + 23) * .45);
+   const weight = Math.max(2.5, artScale * (1.4 + noise(i + 2) * 1.8));
+   const tone = 120 + Math.floor(noise(i) * 80);
+   // Each streak in short pieces, so its characters follow the curve.
+   for (let k = 0; k < 5; k++) {
+    const r0 = radius + (tail - radius) * k / 5, r1 = radius + (tail - radius) * (k + 1) / 5;
+    line([at(angle(r0), r0), at(angle(r1), r1)], tone, weight, true);
+   }
+   ink.restore();
+  }
+ };
+
+ // land is where the big strike lands, if the page says (the hero: the right side of BREAKER's K).
+ const storm = (fx: CanvasRenderingContext2D, pose: Pose, clock: number, time: number, still: boolean, cell: number, land?: Point) => {
+  const scale = pose.scale;
+  const center = framePoint(STRIKE, pose);
+
+  // Lightning: every halo first, then every core over them.
+  const halos: [Point, Point, number][] = [], cores: [Point, Point, number][] = [];
+  const add = (points: Point[], power: number, core = true) => {
+   for (let k = 1; k < points.length; k++) {
+    halos.push([points[k - 1], points[k], 72 * power]);
+    if (core) cores.push([points[k - 1], points[k], 255 * Math.max(.72, power)]);
+   }
+  };
+  // A jagged path from a to b: each segment's midpoint pushed aside, half as far each pass.
+  const path = (a: Point, b: Point, seed: number, rough = .24, depth = 5): Point[] => {
+   let points = [a, b], amplitude = Math.hypot(b[0] - a[0], b[1] - a[1]) * rough;
+   for (let d = 0; d < depth; d++) {
+    const next: Point[] = [points[0]];
+    for (let k = 0; k < points.length - 1; k++) {
+     const p = points[k], q = points[k + 1];
+     const nx = p[1] - q[1], ny = q[0] - p[0], n = Math.hypot(nx, ny) || 1;
+     const off = (noise(seed + d * 31.7 + k * 7.13) - .5) * 2 * amplitude;
+     next.push([(p[0] + q[0]) / 2 + nx / n * off, (p[1] + q[1]) / 2 + ny / n * off], q);
+    }
+    points = next; amplitude /= 2;
+   }
+   return points;
+  };
+  const bolt = (from: Point, angle: number, length: number, seed: number, power: number) => {
+   const main = path(from, [from[0] + Math.cos(angle) * length, from[1] + Math.sin(angle) * length], seed);
+   add(main, power);
+   for (let b = 0; b < 2; b++) {
+    const at = main[Math.floor(main.length * (.25 + .45 * noise(seed + b * 3.7 + 1)))];
+    const turn = angle + (noise(seed + b * 5.1 + 2) < .5 ? -1 : 1) * (.45 + .5 * noise(seed + b + 3));
+    const reach = length * (.25 + .25 * noise(seed + b + 4));
+    add(path(at, [at[0] + Math.cos(turn) * reach, at[1] + Math.sin(turn) * reach], seed + 17 + b, .3, 4), power * .85);
+   }
+  };
+  if (still || time > 1.1) {
+   // A few strikes off the blade, each a flash, a gap, and a second flash.
+   for (let j = 0; j < 3; j++) {
+    const period = 1.25 + j * .53;
+    const cycle = (clock + j * .71) / period, k = Math.floor(cycle), local = (cycle - k) * period;
+    if (still ? j !== 0 : !(local < .05 || (local > .085 && local < .19))) continue;
+    const seed = j * 997 + k * 13 + (still ? 5 : 0);
+    const root = framePoint(ARC_ROOTS[Math.floor(noise(seed + 1) * ARC_ROOTS.length)], pose);
+    const away = Math.atan2(root[1] - center[1], root[0] - center[0]) + (noise(seed + 2) - .5) * 1.5;
+    bolt(root, away, (150 + 170 * noise(seed + 3)) * scale, seed, still || local < .05 ? 1 : .8);
+   }
+   // Current crawling along the edge.
+   const edge = HEAD.slice(4, 11).map(p => framePoint(p, pose));
+   const tick = Math.floor(clock * 20);
+   for (let k = 1; k < edge.length; k++) add(path(edge[k - 1], edge[k], tick * 3.1 + k, .45, 2), .9, still || noise(tick + k * 3.3) > .6);
+  }
+  // The whole head sizzles, as the words do: arcs crawl across it, each from one point of its
+  // outline to another across its face, growing as it goes, then another in its place.
+  const outline = HEAD.map(p => framePoint(p, pose));
+  const along = (u: number): Point => {
+   const f = (((u % 1) + 1) % 1) * outline.length, i = Math.floor(f), t = f - i;
+   const a = outline[i], b = outline[(i + 1) % outline.length];
+   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  };
+  for (let j = 0; j < 6; j++) {
+   const life = .2 + .05 * (j % 3);
+   const cycle = (clock + j * .137) / life, g = Math.floor(cycle), grown = still ? 1 : Math.min(1, (cycle - g) * 1.7);
+   const seed = 7000 + j * 101 + g * 17;
+   const from = noise(seed);
+   const arc = path(along(from), along(from + .3 + .4 * noise(seed + 1)), seed, .32, 4);
+   add(arc.slice(0, Math.max(2, Math.ceil(arc.length * grown))), .85, still || noise(seed + 2) > .2);
+  }
+  // The strike itself: a flash, a blink, a second flash, and gone, well before the word it
+  // struck has burned away.
+  const impact = time - AXE_FLIGHT.impact;
+  if (!still && impact >= 0 && impact < .14 && (impact < .05 || impact > .08)) {
+   const landing = land ?? center;
+   for (let b = 0; b < 7; b++) bolt(landing, b / 7 * Math.PI * 2 + noise(b + 90) * .6, (420 + 380 * noise(b + 91)) * scale, 5000 + b * 31, impact < .07 ? 1 : .8);
+  }
+  const stroke = ([a, b, glow]: [Point, Point, number], width: number) => {
+   const angle = (Math.atan2(a[1] - b[1], b[0] - a[0]) * 180 / Math.PI + 180) % 180;
+   const direction = angle < 22.5 || angle >= 157.5 ? 30 : angle < 67.5 ? 90 : angle < 112.5 ? 210 : 150;
+   fx.beginPath(); fx.moveTo(a[0], a[1]); fx.lineTo(b[0], b[1]);
+   fx.strokeStyle = `rgb(0 ${glow > 150 ? direction : 0} ${Math.round(glow)})`;
+   fx.lineWidth = width; fx.lineCap = 'round'; fx.stroke();
+  };
+  for (const segment of halos) stroke(segment, cell * 2.8);
+  for (const segment of cores) stroke(segment, cell * 1.15);
+ };
+
+ // landing is where the big strike lands, as a fraction of the canvas; without it, on the axe's head.
+ return (time: number, still = false, windTime = time, editorPose?: AxePoseSettings, cell = 8, landing?: { x: number; y: number }) => {
+  const { width, height } = ink.canvas;
+  // Fit the axe separately from the full-screen wind, preserving its proportions.
+  const artScale = Math.min(width * .62 / (right - left), height * .57 / (bottom - top));
+  const held = selectedPose(editorPose ?? DEFAULT_AXE_POSE, width, height, artScale);
+  const origin = throwOrigin(held);
+  const orbit = editorPose ? 0 : ORBIT_ANGLE * (still ? 1 : ease((time - AXE_FLIGHT.orbitStart) / (AXE_FLIGHT.orbitEnd - AXE_FLIGHT.orbitStart)));
+  const viewedOrigin = throwOrigin({ ...held, orbit });
+  const vanishingPoint = { x: .5 + viewedOrigin[0] * artScale / width, y: .5 + viewedOrigin[1] * artScale / height };
+  ink.clearRect(0, 0, width, height);
+  fx?.clearRect(0, 0, width, height);
+  const progress = clamp(time / AXE_FLIGHT.arrival);
+  const rush = ease((progress - .4) / .25) * (1 - ease((progress - .8) / .2));
+  if (!still || editorPose) wind(windTime, .42 + ease(progress) * .14 + rush * .26, width, height, artScale, viewedOrigin);
+  // Negative flight time is the opening typography, with wind but no axe yet.
+  if (time < 0) return vanishingPoint;
+  const entry = (t: number): Pose => {
+   const p = poseAt(t);
+   // Steer during the last spinning arc, reaching the selected angle exactly
+   // when the tumble ends. There is no stopped pose followed by a second turn.
+   const settleStart = AXE_FLIGHT.spinEnd * SPIN_BRAKING_FRACTION;
+   const settle = settleEase((t - settleStart) / (AXE_FLIGHT.spinEnd - settleStart));
+   return {
+    ...p,
+    x: mix(origin[0], held.x, p.scale),
+    y: mix(origin[1], held.y, p.scale),
+    scale: p.scale * held.scale,
+    pitch: mix(FORWARD_PITCH, held.pitch!, settle),
+    yaw: mix(Math.acos(p.face), held.yaw!, settle),
+    cant: held.cant! * settle,
+    roll: mix(p.roll, held.roll, settle),
+    tumble: throwSpin(t),
+    // Carry the same camera through the approach and held pose without a jump.
+    orbit,
+   };
+  };
+  const age = Math.max(0, time - AXE_FLIGHT.arrival);
+  const arrived = time >= AXE_FLIGHT.arrival;
+  let pose = entry(time);
+  if (arrived || still) {
+   const amount = still ? 0 : ease(age / .45);
+   pose = {
+    ...held,
+    x: held.x + amount * (Math.sin(age * 7.3) * 1.3 + Math.sin(age * 13.1) * .45),
+    y: held.y + amount * (Math.sin(age * 5.7) * 1.6 + Math.sin(age * 11.3) * .5),
+    roll: held.roll + amount * (Math.sin(age * 3.1) * .012 + Math.sin(age * 9.7) * .004),
+    yaw: held.yaw! + amount * Math.sin(age * 2.3) * .008,
+    bend: amount * Math.sin(age * 7.3) * 2.7,
+    scale: held.scale * (1 + amount * Math.sin(age * 2.1) * .004),
+    orbit,
+   };
+  }
+  if (editorPose) {
+   pose = held;
+  }
+  ink.save(); ink.translate(width / 2, height / 2); ink.scale(artScale, artScale);
+  if (!still && progress > .4 && progress < .9) {
+   // A brief drawn trail gives the entrance momentum; it clears for the held pose.
+   const trail = [.11, .06, 0].map(lag => entry(Math.max(0, time - lag)));
+   ink.save(); ink.globalAlpha = .5 * (1 - ease((progress - .7) / .2));
+   const upper = trail.map(p => framePoint([75, -148], p));
+   const lower = [...trail].reverse().map(p => framePoint([94, -12], p));
+   polygon([...upper, ...lower], 43);
+   line(upper, 90, 3, true);
+   axe(trail[0], true);
+   ink.restore();
+  }
+  axe(pose);
+  ink.restore();
+  if (fx) {
+   fx.save(); fx.translate(width / 2, height / 2); fx.scale(artScale, artScale);
+   const land: Point | undefined = landing && [(landing.x - .5) * width / artScale, (landing.y - .5) * height / artScale];
+   storm(fx, pose, windTime, time, still, cell / artScale, land);
+   fx.restore();
+  }
+  return vanishingPoint;
+ };
+}

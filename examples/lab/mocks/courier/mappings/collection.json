@@ -1,0 +1,4 @@
+{
+  "request": {"method": "GET", "urlPathPattern": "/courier/collections/.*"},
+  "response": {"status": 200, "headers": {"Content-Type": "application/json"}, "jsonBody": {"slot": "09:00-12:00"}}
+}

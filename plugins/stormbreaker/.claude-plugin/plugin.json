@@ -1,0 +1,13 @@
+{
+  "name": "stormbreaker",
+  "version": "0.1.0",
+  "description": "Write smoke and load runs with stormbreaker (github.com/nimbusxr/stormbreaker), and the dispatchers that prepare and clean up for them, in shared environments.",
+  "author": {
+    "name": "NimbusXR",
+    "url": "https://github.com/nimbusxr"
+  },
+  "homepage": "https://stormbreaker.nimbusxr.us",
+  "repository": "https://github.com/nimbusxr/stormbreaker",
+  "license": "Apache-2.0",
+  "keywords": ["load-testing", "smoke-testing", "gherkin", "acceptance-testing", "axx"]
+}

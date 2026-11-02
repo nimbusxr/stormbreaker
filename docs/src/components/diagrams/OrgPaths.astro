@@ -1,0 +1,12 @@
+---
+// The paths in one environment: what crosses its edge and what stays inside (scenes-org.ts).
+import AsciiDiagram from './AsciiDiagram.astro';
+import { orgPaths } from './scenes-org';
+
+interface Props {
+	caption?: string;
+}
+const { caption = 'Only the runner’s calls cross the environment’s edge, through ingress. Everything between the orchestrator and the dispatchers stays inside the cluster.' } = Astro.props;
+---
+
+<AsciiDiagram name="the paths" scene={orgPaths.scene} title={orgPaths.title} text={orgPaths.text} caption={caption} legend={[{ kind: 'coord', label: 'to the orchestrator' }, { kind: 'notify', label: 'notifications' }, { kind: 'traffic', label: 'traffic' }, { kind: 'own', label: 'a team’s own door' }]} />

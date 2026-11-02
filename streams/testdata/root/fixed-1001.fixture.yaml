@@ -1,0 +1,6 @@
+factory: parcel
+# Overrides the prototype's expression with an authored identity.
+data:
+  reference: PX-1001
+  sender: otter-toys
+  pieces: 1

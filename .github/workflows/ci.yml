@@ -1,0 +1,236 @@
+name: ci
+
+on:
+  pull_request:
+  # What reaches main passed its pull request (and the merge queue), so a push to main tests
+  # nothing. It runs only when it changes what the caches pull requests read are made from: then
+  # its jobs refresh those caches, and do nothing else.
+  push:
+    branches: [main]
+    paths:
+      - go.mod
+      - go.sum
+      - .mise.toml
+      - .github/actions/**
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Which jobs a run needs (scripts/ci-changes.sh). A pull request runs the jobs for the files it
+  # changes, and a change to CI itself runs every job. The merge queue runs none when a passing
+  # run of the pull request tested the very same tree (scripts/ci-tested.sh). A push to main runs
+  # no tests (tests is false): it refreshes the caches pull requests read.
+  changes:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read # the pull request's passing runs, for the merge queue
+      pull-requests: read # the queued pull request's head
+    outputs:
+      go: ${{ steps.changes.outputs.go }}
+      examples: ${{ steps.changes.outputs.examples }}
+      workflows: ${{ steps.changes.outputs.workflows }}
+      tests: ${{ steps.changes.outputs.tests }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          QUEUED: ${{ github.event.merge_group.head_ref }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$EVENT" = merge_group ] && scripts/ci-tested.sh "$QUEUED"; then
+            scripts/ci-changes.sh --none
+          elif [ "$EVENT" != push ] && files=$(git diff --name-only HEAD^1 HEAD); then
+            printf '%s\n' "$files" | scripts/ci-changes.sh
+          else
+            scripts/ci-changes.sh --all
+          fi | tee -a "$GITHUB_OUTPUT"
+          if [ "$EVENT" = push ]; then echo tests=false; else echo tests=true; fi | tee -a "$GITHUB_OUTPUT"
+      # The tree the pull request's run tests, for the merge queue to know it.
+      - if: github.event_name == 'pull_request'
+        run: git rev-parse 'HEAD^{tree}' > "$RUNNER_TEMP/tested-tree"
+      - if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: tested-tree
+          path: ${{ runner.temp }}/tested-tree
+          retention-days: 30
+
+  hygiene:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: "aqua:gitleaks/gitleaks"
+          # Tools are cached from main only: pull requests read them.
+          cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - run: scripts/hygiene.sh
+      - name: gitleaks (history)
+        run: gitleaks git --no-banner --redact .
+
+  lint:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: "go golangci-lint"
+          # Tools are cached from main only: pull requests read them.
+          cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/go-cache
+        with:
+          build: lint
+          extra-paths: ~/.cache/golangci-lint
+      - run: go mod tidy -diff
+      - name: generated files are up to date
+        run: |
+          # The UI's web app is built (and type-checked) into internal/ui/dist by go generate.
+          npm --prefix ui ci --no-audit --no-fund
+          go generate ./...
+          # untracked files count too (a newly generated file must be committed)
+          git status --porcelain
+          test -z "$(git status --porcelain)"
+      - run: golangci-lint run
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      # This job keeps Linux's module cache (see .github/actions/go-cache).
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/go-cache
+        with:
+          build: lint
+          mode: save
+          extra-paths: ~/.cache/golangci-lint
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: "go aqua:gotestyourself/gotestsum"
+          # Tools are cached from main only: pull requests read them.
+          cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/go-cache
+        with:
+          build: test
+      # On main the tests are only built: their build cache is what pull requests read.
+      - name: the tests, built
+        run: go test -race -run '^$' ./...
+        shell: bash
+      - if: needs.changes.outputs.tests == 'true'
+        run: scripts/gotest.sh -race -timeout 10m ./...
+        shell: bash
+      # On macOS and Windows this job keeps the module cache too (lint does on Linux).
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/go-cache
+        with:
+          build: test
+          mode: save
+          modules: ${{ runner.os != 'Linux' }}
+
+  cross-build:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    # CGO_ENABLED=0 must keep working for every release target. Built with -trimpath like
+    # GoReleaser, so release-check and the release dry run reuse this job's build cache.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: "go"
+          # Tools are cached from main only: pull requests read them.
+          cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/go-cache
+        with:
+          build: cross
+      - run: |
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -trimpath -o /dev/null ./cmd/stormbreaker
+          done
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/go-cache
+        with:
+          build: cross
+          mode: save
+          modules: "false"
+
+  release-check:
+    needs: changes
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.tests == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: "go goreleaser"
+          # Tools are cached from main only: pull requests read them.
+          cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/go-cache
+        with:
+          build: cross
+      - run: goreleaser check
+      - run: GORELEASER_CURRENT_TAG=$(scripts/cli-tag.sh) goreleaser build --snapshot --clean --single-target
+
+  workflows:
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true' && needs.changes.outputs.tests == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: "aqua:rhysd/actionlint"
+          # Tools are cached from main only: pull requests read them.
+          cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - run: mise exec aqua:rhysd/actionlint -- actionlint
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+      # Security audit of every workflow (template injection, permissions, pinning...).
+      - run: uvx zizmor --offline --min-severity medium --format github .github/workflows
+
+  # Single required status check; keeps branch protection simple as jobs are added. A job a
+  # pull request does not need is skipped, which passes.
+  ci-ok:
+    if: always()
+    needs: [changes, hygiene, lint, workflows, test, cross-build, release-check]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: all jobs passed
+        run: |
+          [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "false" ]]

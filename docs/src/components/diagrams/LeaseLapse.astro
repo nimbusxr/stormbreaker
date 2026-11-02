@@ -1,0 +1,12 @@
+---
+// Leases across an orchestrator outage, with one lease of grace at restart (scenes-org.ts).
+import AsciiDiagram from './AsciiDiagram.astro';
+import { leaseLapse } from './scenes-org';
+
+interface Props {
+	caption?: string;
+}
+const { caption = 'Silence while the orchestrator is down is not held against anyone: after a restart, every lease gets one lease to be renewed.' } = Astro.props;
+---
+
+<AsciiDiagram name="leases across an outage" scene={leaseLapse.scene} title={leaseLapse.title} text={leaseLapse.text} caption={caption} legend={[{ kind: 'coord', label: 'a renewal' }, { kind: 'ok', label: 'up' }, { kind: 'fail', label: 'down, or unreachable' }]} />

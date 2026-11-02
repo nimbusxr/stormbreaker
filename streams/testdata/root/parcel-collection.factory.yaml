@@ -1,0 +1,6 @@
+# A second event type: its own schema, so a key's messages can change shape.
+factory:
+  family: json
+  schema: parcel.schema.json
+identity:
+  - path: reference

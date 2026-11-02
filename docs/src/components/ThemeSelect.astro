@@ -1,0 +1,41 @@
+---
+import { Icon } from '@astrojs/starlight/components';
+---
+
+<sb-theme-toggle hidden>
+	<button type="button" class="theme-toggle" aria-label="Light mode" aria-pressed="false" title="Switch to light mode">
+		<Icon name="sun" class="theme-sun" size="1.1rem" />
+		<Icon name="moon" class="theme-moon" size="1.1rem" />
+	</button>
+</sb-theme-toggle>
+
+<script>
+	declare global {
+		interface Window {
+			SbTheme: { set(theme: 'dark' | 'light'): void };
+		}
+	}
+
+	class SbThemeToggle extends HTMLElement {
+		private sync = () => {
+			const light = document.documentElement.dataset.theme === 'light';
+			const button = this.querySelector('button')!;
+			button.setAttribute('aria-pressed', String(light));
+			button.title = `Switch to ${light ? 'dark' : 'light'} mode`;
+		};
+		private toggle = () => {
+			window.SbTheme.set(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+		};
+		connectedCallback() {
+			this.sync();
+			this.hidden = false;
+			this.addEventListener('click', this.toggle);
+			window.addEventListener('sb:theme-change', this.sync);
+		}
+		disconnectedCallback() {
+			this.removeEventListener('click', this.toggle);
+			window.removeEventListener('sb:theme-change', this.sync);
+		}
+	}
+	if (!customElements.get('sb-theme-toggle')) customElements.define('sb-theme-toggle', SbThemeToggle);
+</script>

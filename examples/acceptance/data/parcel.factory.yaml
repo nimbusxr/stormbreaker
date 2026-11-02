@@ -1,0 +1,8 @@
+# A parcel registration, as a shop's system sends it to the parcels service's front door. Its
+# reference is an ordinary UUID each record derives for itself: nothing marks it as test data, and
+# nothing but the run knows it.
+factory:
+  family: json
+identity:
+  - path: reference
+    format: uuid-name-based

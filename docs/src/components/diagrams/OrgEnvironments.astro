@@ -1,0 +1,12 @@
+---
+// One orchestrator per environment, nothing shared between them (scenes-org.ts).
+import AsciiDiagram from './AsciiDiagram.astro';
+import { orgEnvironments } from './scenes-org';
+
+interface Props {
+	caption?: string;
+}
+const { caption = 'Environments share nothing: each has its own orchestrator, dispatchers and token, and a pipeline points at one of them.' } = Astro.props;
+---
+
+<AsciiDiagram name="environments" scene={orgEnvironments.scene} title={orgEnvironments.title} text={orgEnvironments.text} caption={caption} legend={[{ kind: 'coord', label: 'to the orchestrator' }, { kind: 'notify', label: 'notifications' }]} />

@@ -1,0 +1,13 @@
+---
+// Where a service's metrics are: per app per region, per region, or global (scenes.ts).
+import AsciiDiagram from './AsciiDiagram.astro';
+import { DIAGRAMS } from './descriptions';
+import { prometheusTopologies } from './scenes';
+
+interface Props {
+	caption?: string;
+}
+const { caption = 'The check is the same in all three; only the service’s url and selector change.' } = Astro.props;
+---
+
+<AsciiDiagram name="where the metrics are" scene={prometheusTopologies} title={DIAGRAMS.PrometheusTopologies.title} text={DIAGRAMS.PrometheusTopologies.text} caption={caption} />

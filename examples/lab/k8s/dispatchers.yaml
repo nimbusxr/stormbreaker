@@ -1,0 +1,97 @@
+# One dispatcher per team app per environment: the parcels team's in each region (each answers
+# for what its region prepared), and the tracking team's. Each joins the delivery group.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: parcels-dispatcher-east, namespace: stormbreaker-lab}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: parcels-dispatcher, region: east}}
+  template:
+    metadata: {labels: {app: parcels-dispatcher, region: east}}
+    spec:
+      containers:
+        - name: dispatcher
+          image: stormbreaker-lab:dev
+          imagePullPolicy: Never
+          command: [parcels-dispatcher]
+          env:
+            - {name: STORMBREAKER_DISPATCHER, value: parcels}
+            - {name: STORMBREAKER_INSTANCE, value: east}
+            - {name: STORMBREAKER_TEAM, value: parcels}
+            - {name: STORMBREAKER_CALLBACK_URL, value: "http://parcels-dispatcher-east:8090/events"}
+            - {name: STORMBREAKER_ORCHESTRATOR, value: "http://orchestrator:8080"}
+            - {name: STORMBREAKER_GROUPS, value: delivery}
+            - {name: PARCELS_ADMIN_URL, value: "http://parcels-east:8081"}
+          ports: [{containerPort: 8090}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8090}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: parcels-dispatcher-east, namespace: stormbreaker-lab}
+spec:
+  selector: {app: parcels-dispatcher, region: east}
+  ports: [{port: 8090, targetPort: 8090}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: parcels-dispatcher-west, namespace: stormbreaker-lab}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: parcels-dispatcher, region: west}}
+  template:
+    metadata: {labels: {app: parcels-dispatcher, region: west}}
+    spec:
+      containers:
+        - name: dispatcher
+          image: stormbreaker-lab:dev
+          imagePullPolicy: Never
+          command: [parcels-dispatcher]
+          env:
+            - {name: STORMBREAKER_DISPATCHER, value: parcels}
+            - {name: STORMBREAKER_INSTANCE, value: west}
+            - {name: STORMBREAKER_TEAM, value: parcels}
+            - {name: STORMBREAKER_CALLBACK_URL, value: "http://parcels-dispatcher-west:8090/events"}
+            - {name: STORMBREAKER_ORCHESTRATOR, value: "http://orchestrator:8080"}
+            - {name: STORMBREAKER_GROUPS, value: delivery}
+            - {name: PARCELS_ADMIN_URL, value: "http://parcels-west:8081"}
+          ports: [{containerPort: 8090}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8090}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: parcels-dispatcher-west, namespace: stormbreaker-lab}
+spec:
+  selector: {app: parcels-dispatcher, region: west}
+  ports: [{port: 8090, targetPort: 8090}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: tracking-dispatcher, namespace: stormbreaker-lab}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: tracking-dispatcher}}
+  template:
+    metadata: {labels: {app: tracking-dispatcher}}
+    spec:
+      containers:
+        - name: dispatcher
+          image: stormbreaker-lab:dev
+          imagePullPolicy: Never
+          command: [tracking-dispatcher]
+          env:
+            - {name: STORMBREAKER_DISPATCHER, value: tracking}
+            - {name: STORMBREAKER_INSTANCE, value: shared}
+            - {name: STORMBREAKER_TEAM, value: tracking}
+            - {name: STORMBREAKER_CALLBACK_URL, value: "http://tracking-dispatcher:8090/events"}
+            - {name: STORMBREAKER_ORCHESTRATOR, value: "http://orchestrator:8080"}
+            - {name: STORMBREAKER_GROUPS, value: delivery}
+            - {name: DATABASE_URL, value: "postgres://tracking:lab-only-password@postgres:5432/tracking"}
+          ports: [{containerPort: 8090}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8090}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: tracking-dispatcher, namespace: stormbreaker-lab}
+spec:
+  selector: {app: tracking-dispatcher}
+  ports: [{port: 8090, targetPort: 8090}]

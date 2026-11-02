@@ -1,0 +1,66 @@
+# Static analysis of every language in the repository.
+name: codeql
+
+# A pull request analyzes what it changes (the release PR too), and one that changes no language's
+# files the workflows: every merged change has a code scanning result. What it merges is not
+# analyzed again. The weekly run analyzes main whole, the baseline the Security tab shows, and so
+# does a manual run.
+on:
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  # A pull request analyzes the languages it changes (scripts/ci-changes.sh); the weekly run
+  # analyzes them all. Go has no build-free mode: CodeQL's autobuild builds the
+  # module with the Go version go.mod asks for.
+  languages:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.changes.outputs.codeql }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = pull_request ] && files=$(git diff --name-only HEAD^1 HEAD); then
+            printf '%s\n' "$files" | scripts/ci-changes.sh
+          else
+            scripts/ci-changes.sh --all
+          fi | tee -a "$GITHUB_OUTPUT"
+
+  analyze:
+    name: analyze (${{ matrix.language }})
+    needs: languages
+    if: needs.languages.outputs.matrix != '{"include":[]}'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read # the run's details, which private and internal repositories do not expose otherwise
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.languages.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # Its dependency caches (Java's alone 3.6 GB, one for each pull request) would push the
+          # repository over GitHub's 10 GB of caches, and drop those CI's jobs read.
+          dependency-caching: false
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:${{ matrix.language }}

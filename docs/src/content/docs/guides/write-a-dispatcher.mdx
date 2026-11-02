@@ -1,0 +1,100 @@
+---
+title: Write a dispatcher
+description: Take part in runs with the dispatcher-sdk. Prepare what a run will need from its footprint, and clean up what your systems created and prove it.
+---
+
+import DispatcherHooks from '../../../components/diagrams/DispatcherHooks.astro';
+
+A dispatcher is your team's part in a run. It runs beside your app, one per app per environment, and it does two things:
+
+- **Prepare.** Before the traffic, it declares what your systems will create from what the run declared, and may prepare for it.
+- **Clean up.** After the traffic, it removes what your systems created and proves it.
+
+<DispatcherHooks />
+
+The dispatcher-sdk owns everything else:
+
+- registering with the orchestrator and renewing the lease;
+- checking notifications' signatures and dropping repeats;
+- falling back to the event feed when a notification is missed;
+- running prepare rounds until they settle, and not again until the footprint grows;
+- reporting status, and that a long round is still under way.
+
+```go title="main.go"
+package main
+
+import (
+	"context"
+
+	"github.com/nimbusxr/stormbreaker/dispatcher/sdk"
+)
+
+func main() {
+	sdk.Main(sdk.Hooks{
+		Prepare: func(ctx context.Context, run *sdk.Run, declare func(sdk.Entry) error) error {
+			// Every parcel the parcels team declared, in any region: an empty locator is the whole store.
+			for id, err := range run.Identities(ctx, "parcels-mem", "", sdk.From("parcels")) {
+				if err != nil {
+					return err
+				}
+				// The tracking record our service will write for each parcel.
+				if err := declare(sdk.Entry{Store: "tracking-db", Locator: "public.tracking", Identities: []string{"TRK-" + id}}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		Cleanup: func(ctx context.Context, run *sdk.Run, remove func(sdk.Removal) error) (bool, error) {
+			// What we declared and have not answered for yet: after a restart, only what is left.
+			for id, err := range run.Unanswered(ctx, "tracking-db", "public.tracking") {
+				if err != nil {
+					return false, err
+				}
+				// Delete it, check it is gone, then say so.
+				if err := remove(sdk.Removal{Store: "tracking-db", Locator: "public.tracking", Identities: []string{id}}); err != nil {
+					return false, err
+				}
+			}
+			return true, nil
+		},
+	})
+}
+```
+
+Hooks read the footprint a page at a time, and report what they declare or remove as they go; the SDK sends it in chunks of 25,000 identities. Walking with `Footprint` or `Identities` holds one page, however large the run; `Unanswered` holds the place's identities while it walks.
+
+The lab's dispatchers, `examples/dispatchers/`, are complete examples: one prepares through an admin API, the other cleans up in Postgres.
+
+## The rules
+
+- **A declaration is a pure function of what the hook walks and of the run, made in the same order.** Prepare runs in rounds until one adds nothing; saying the same again stores nothing. Derive, never invent: a dispatcher that mints identities in reaction to its own declarations never settles.
+- **Walk only what you derive from.** `run.Footprint(ctx, sdk.From(sdk.Suite), sdk.At("parcels", "/parcels"))` reads only the suite's claims at one place. A settled round is not run again until something new is reported where it walked, so other teams' declarations do not wake it. `Identities` and `Unanswered` narrow themselves to their place ([ADR 0024](https://github.com/nimbusxr/stormbreaker/blob/main/docs/adr/0024-a-hook-walks-only-what-it-derives-from.md)).
+- **Prepare writes only what is idempotent, for identities already in the footprint.** It may run several times.
+- **Clean up only what your systems created**, and report removals as deltas: what you removed, where.
+- **Removed means checked gone.** Remove, look again, then report. Where removing is not possible now (a compacted topic, an aggregate), report a `CleanBy` date.
+- **Wait for what is still to come.** A store written asynchronously can receive a run's records after cleanup begins: return `complete` false while declared records have not appeared, for a grace after the traffic ended. Better, have the scenario drain first ([the consumer group step](/guides/drive-kafka-load/#let-downstream-drain)).
+- **Work from the footprint, not from memory.** `run.Unanswered` walks what you declared at a place and have not yet answered for, each once, so a restarted cleanup neither removes nor reports anything twice.
+- **An identity can come more than once** from `Identities` (several instances can claim it); what you do with each must be idempotent.
+- **Say when you cannot.** Wrap an error with `sdk.ErrBlocked`, and a run that requires you fails at once instead of waiting out its readiness timeout. Any other error is retried on the next pass.
+
+## Run it
+
+`sdk.Main` reads its configuration from the environment:
+
+| Variable | What it is |
+|---|---|
+| `STORMBREAKER_DISPATCHER` | required: the dispatcher's name, which scenarios require (`@stormbreaker-requires/tracking`) |
+| `STORMBREAKER_INSTANCE` | required: this instance's name, stable across restarts and rollouts: its region or partition, never its pod's |
+| `STORMBREAKER_TEAM` | required: the team that owns it |
+| `STORMBREAKER_CALLBACK_URL` | required: where the orchestrator reaches it, its address and `/events` |
+| `STORMBREAKER_ORCHESTRATOR` | required: the orchestrator's URL; `STORMBREAKER_TOKEN` its token |
+| `STORMBREAKER_GROUPS` | the groups it joins, comma-separated |
+| `STORMBREAKER_SECRET` | the notifications' signing secret, `whsec_` and base64 (default: a fresh one) |
+| `STORMBREAKER_ADDR` | where it listens (default `:8090`) |
+| `STORMBREAKER_REASSERT` | how often it renews its lease and reports afresh (default `10s`) |
+
+Run one per app per environment. Where your state is partitioned, run one per partition: each instance prepares and cleans up what is its own. An app with nothing to prepare or clean up can run the stock image, `ghcr.io/nimbusxr/stormbreaker-dispatcher`, which takes part and reports prepared, then completed.
+
+## Other languages
+
+A dispatcher is defined by its protocol: the orchestrator's [API](/references/orchestrator-api/), and the signed notifications it sends. The Go SDK is the first implementation of it. Dispatchers in other languages are on the [roadmap](/explanations/roadmap/), held to a conformance kit that any implementation can pass.

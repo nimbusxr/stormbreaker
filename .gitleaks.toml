@@ -1,0 +1,11 @@
+# Secret scanning (scripts/hygiene.sh): gitleaks' default rules.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "The Standard Webhooks specification's published test vector (its key and message ID), which the signing tests check against"
+regexes = ['''MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw''', '''msg_p5jXN8AQM9LWM0D4loKWxJek''']
+
+[[allowlists]]
+description = "Chrome's WebMCP origin-trial token for nimbusxr.us (docs/astro.config.mjs): public by design, served in every page's HTML"
+regexes = ['''Au6\+vW\+zV403Rr8nG3rt7t4kt0d4TKhCO//DVEhDvH2tcoxBvC/HCQ7Bk5aJRg6KMMKAdc82K1Eux4vwRQl1SQ0AAABeeyJvcmlnaW4iOiJodHRwczovL25pbWJ1c3hyLnVzOjQ0MyIsImZlYXR1cmUiOiJXZWJNQ1AiLCJleHBpcnkiOjE4MDYzNjQ4MDAsImlzU3ViZG9tYWluIjp0cnVlfQ==''']

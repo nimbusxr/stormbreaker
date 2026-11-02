@@ -1,0 +1,13 @@
+---
+// How a transition reaches every dispatcher (scenes.ts).
+import AsciiDiagram from './AsciiDiagram.astro';
+import { DIAGRAMS } from './descriptions';
+import { delivery } from './scenes';
+
+interface Props {
+	caption?: string;
+}
+const { caption = 'Written first, signed and sent, backstopped by the event feed, and acted on as a claim check: duplicates and late arrivals change nothing.' } = Astro.props;
+---
+
+<AsciiDiagram name="delivery" scene={delivery} title={DIAGRAMS.Delivery.title} text={DIAGRAMS.Delivery.text} caption={caption} />

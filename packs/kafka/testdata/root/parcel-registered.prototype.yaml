@@ -1,0 +1,8 @@
+data:
+  type: ParcelRegistered
+metadata:
+  key:
+    $ref: "#/reference"
+  headers:
+    source: load-suite
+    event-type: ParcelRegistered

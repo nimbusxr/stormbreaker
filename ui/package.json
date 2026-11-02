@@ -1,0 +1,14 @@
+{
+  "name": "stormbreaker-ui",
+  "private": true,
+  "description": "The stormbreaker UI's web app (ADR 0026), built into internal/ui/dist, which the binary embeds.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node build.mjs",
+    "check": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,2 @@
+# The advisories osv-scanner (OpenSSF Scorecard's Vulnerabilities check, scorecard.yml) leaves out
+# of go.mod's, each with the reason. None yet.

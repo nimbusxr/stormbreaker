@@ -1,0 +1,6 @@
+# Identities derived for each record: no expression function needed, so `stormbreaker streams`
+# can generate it again on its own.
+count: 5
+mix:
+  - fixture: bare/bare#no-identity
+    weight: 1

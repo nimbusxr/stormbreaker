@@ -1,0 +1,7 @@
+data:
+  reference: PX-LAB-1
+  declaredValue: 25.5
+  status: SORTED
+metadata:
+  key:
+    $ref: "#/scanId"

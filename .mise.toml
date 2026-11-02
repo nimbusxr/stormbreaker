@@ -1,0 +1,22 @@
+[tools]
+go = "1.27.3"
+golangci-lint = "2"
+goreleaser = "2"
+lefthook = "2.2.2"
+node = "22"  # docs site only
+"aqua:gitleaks/gitleaks" = "latest"
+"aqua:rhysd/actionlint" = "latest"
+"aqua:gotestyourself/gotestsum" = "latest"  # scripts/gotest.sh, in CI
+"aqua:kubernetes-sigs/kind" = "0.33.0"  # the examples' lab (examples/lab)
+
+[tasks.test]
+run = "go test -race ./..."
+
+[tasks.lint]
+run = "golangci-lint run"
+
+[tasks.generate]
+run = "go generate ./..."
+
+[tasks.hygiene]
+run = "scripts/hygiene.sh"

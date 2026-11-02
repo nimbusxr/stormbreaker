@@ -1,0 +1,7 @@
+data:
+  reference: PX-LAB-1
+  weightGrams: 2400
+  status: SORTED
+metadata:
+  key:
+    $ref: "#/scanId"

@@ -1,0 +1,61 @@
+---
+// A diagram drawn in characters (src/lib/ascii-diagram.ts), told in steps its reader clicks
+// through. Each step's grid is rendered here; a small script on the page keeps the controls.
+// The steps never move by themselves; a lit line pulses the way it goes (diagrams.css).
+import { render, type Scene } from '../../lib/ascii-diagram';
+
+interface Props {
+	/** The frame's name, as a terminal names its window. */
+	name: string;
+	scene: Scene;
+	/** What the diagram shows, in words: for assistive technology and text-only readers. */
+	title: string;
+	text: string;
+	caption?: string;
+	/** What its colors mean, as the scene uses them. */
+	legend?: { kind: string; label: string }[];
+}
+const { name, scene, title, text, caption, legend = [] } = Astro.props;
+const steps = render(scene);
+---
+
+<figure class="adg" data-adg>
+	{/* For text-only readers of the page (llms.txt): what it shows, and each step. */}
+	<p class="dg-text" hidden>{`Diagram: ${title}. ${text}`}</p>
+	<div class="adg-bar">
+		<span class="adg-name">{name}</span>
+		{steps.length > 1 && (
+			<div class="adg-controls" role="group" aria-label={`${title}: steps`}>
+				<button type="button" class="adg-nav" data-prev aria-label="Previous step">‹</button>
+				{steps.map((s, i) => (
+					<button type="button" class="adg-num" data-goto={i} aria-label={`Step ${i + 1}: ${s.name}`} aria-pressed={i === 0 ? 'true' : 'false'}>{i + 1}</button>
+				))}
+				<button type="button" class="adg-nav" data-next aria-label="Next step">›</button>
+			</div>
+		)}
+	</div>
+	<div class="adg-caption" aria-live="polite">
+		{steps.map((s, i) => (
+			<p data-caption={i} hidden={i !== 0}>
+				{steps.length > 1 && <span class="adg-count">{`${i + 1}/${steps.length}`}</span>}
+				<strong>{s.name}.</strong> {s.text}
+			</p>
+		))}
+	</div>
+	<div class="adg-stage" role="img" aria-label={`${title}. ${text}`}>
+		<div class="adg-layers">
+			{steps.map((s, i) => <pre class="adg-grid" data-grid={i} hidden={i !== 0} set:html={s.html} />)}
+		</div>
+	</div>
+	{legend.length > 0 && (
+		<ul class="adg-legend" aria-hidden="true">
+			{legend.map((l) => <li><span class={`k-${l.kind}`}>──</span>{l.label}</li>)}
+		</ul>
+	)}
+	{caption && <figcaption>{caption}</figcaption>}
+</figure>
+
+<script>
+	import { startDiagram } from '../../lib/ascii-diagram-player';
+	document.querySelectorAll<HTMLElement>('[data-adg]').forEach(startDiagram);
+</script>

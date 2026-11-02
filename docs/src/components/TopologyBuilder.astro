@@ -1,0 +1,410 @@
+---
+// The topology builder: a reader describes their environment and sees it drawn with stormbreaker
+// on top, step by step, with what each party sets up (src/lib/topology.ts). The page shows a
+// preview; the builder opens full screen. It all runs in the browser: the description is kept in
+// this browser's storage, and goes into a link only when the reader copies one.
+---
+
+<div class="tb not-content" data-topology-builder>
+	<div class="tb-preview" data-preview></div>
+	<div class="tb-cta">
+		<button type="button" class="tb-primary" data-open>Open the builder</button>
+		<span class="tb-note">Draw your own environment, full screen. It stays in this browser.</span>
+	</div>
+
+	<dialog class="tb-dialog" aria-labelledby="tb-title">
+		<header class="tb-top">
+			<h2 id="tb-title">Your environment, with stormbreaker</h2>
+			<div class="tb-actions">
+				<button type="button" data-example>Start from the example</button>
+				<button type="button" data-share>Copy link</button>
+				<button type="button" class="tb-close" data-close aria-label="Close the builder">×</button>
+			</div>
+		</header>
+		<div class="tb-body">
+			<aside class="tb-editor" data-editor aria-label="Describe your environment"></aside>
+			<section class="tb-view" aria-live="polite">
+				<div data-figure></div>
+				<div class="tb-list" data-list></div>
+			</section>
+		</div>
+	</dialog>
+</div>
+
+<script>
+	import { checklist, EXAMPLE, LIMITS, normalize, scene, slug, tidy, type Topology } from '../lib/topology';
+	import { figureHTML, startDiagram } from '../lib/ascii-diagram-player';
+
+	type ServiceState = { id: string; name: string; zones: string[]; calls: string[] };
+	type DependencyState = { id: string; name: string; internal: boolean; mocked: boolean };
+	type State = { environment: string; group: string; zones: string[]; metrics: Topology['metrics']; target: string; services: ServiceState[]; dependencies: DependencyState[] };
+
+	const KEY = 'stormbreaker-topology';
+	const root = document.querySelector<HTMLElement>('[data-topology-builder]');
+	if (root) {
+		const dialog = root.querySelector<HTMLDialogElement>('.tb-dialog')!;
+		const editor = root.querySelector<HTMLElement>('[data-editor]')!;
+		const figure = root.querySelector<HTMLElement>('[data-figure]')!;
+		const list = root.querySelector<HTMLElement>('[data-list]')!;
+		const preview = root.querySelector<HTMLElement>('[data-preview]')!;
+		const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+		let seq = 0;
+		const newId = () => `i${++seq}`;
+
+		// The editor works on ids, so renaming a service or a dependency keeps whoever calls it;
+		// what is saved and shared is the topology, by name.
+		const fromTopology = (raw: Topology): State => {
+			const t = tidy(raw);
+			const services = t.services.map((m) => ({ id: newId(), name: m.name, zones: [...m.zones], calls: [] as string[] }));
+			const dependencies = t.dependencies.map((d) => ({ id: newId(), name: d.name, internal: d.internal, mocked: d.mocked }));
+			const key = new Map([...services.map((m) => [m.name, `s:${m.id}`] as const), ...dependencies.map((d) => [d.name, `d:${d.id}`] as const)]);
+			t.services.forEach((m, i) => (services[i].calls = m.calls.map((c) => key.get(c)!).filter(Boolean)));
+			return { environment: t.environment, group: t.group, zones: [...t.zones], metrics: t.metrics, target: services.find((m) => m.name === t.target)?.id ?? services[0]?.id ?? '', services, dependencies };
+		};
+		const nameOf = (s: State, key: string) => (key.startsWith('s:') ? s.services.find((m) => m.id === key.slice(2))?.name : s.dependencies.find((d) => d.id === key.slice(2))?.name) ?? '';
+		const toTopology = (s: State): Topology => ({
+			environment: s.environment, group: s.group, zones: s.zones, metrics: s.metrics,
+			target: s.services.find((m) => m.id === s.target)?.name ?? '',
+			services: s.services.map((m) => ({ name: m.name, zones: m.zones.filter((z) => s.zones.includes(z)), calls: m.calls.map((c) => nameOf(s, c)).filter(Boolean) })),
+			dependencies: s.dependencies.map((d) => ({ name: d.name, internal: d.internal, mocked: d.mocked })),
+		});
+
+		// What was described last, here; or a link someone shared, which then leaves the address.
+		const b64 = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+		const unb64 = (s: string) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0)));
+		let shared = false;
+		const initial = (): Topology => {
+			const hash = location.hash.match(/^#t=([\w-]+)$/);
+			if (hash) {
+				try {
+					const t = normalize(JSON.parse(unb64(hash[1])));
+					history.replaceState(null, '', location.pathname + location.search);
+					shared = true;
+					return t;
+				} catch { /* not a description: fall through */ }
+			}
+			try {
+				const saved = localStorage.getItem(KEY);
+				if (saved) return normalize(JSON.parse(saved));
+			} catch { /* storage unavailable */ }
+			return EXAMPLE;
+		};
+		let state = fromTopology(initial());
+		const save = () => { try { localStorage.setItem(KEY, JSON.stringify(toTopology(state))); } catch { /* storage unavailable */ } };
+
+		// The drawing, fitted to its frame's width: the characters shrink rather than scroll.
+		let stopFigure: (() => void) | undefined, stopPreview: (() => void) | undefined;
+		const fit = (frame: HTMLElement, columns: number, largest: number) => {
+			const stage = frame.querySelector<HTMLElement>('.adg-stage');
+			if (!stage) return;
+			const size = Math.max(6.5, Math.min(largest, (stage.clientWidth - 34) / (columns * 0.602)));
+			frame.querySelectorAll<HTMLElement>('.adg-grid').forEach((g) => (g.style.fontSize = `${size}px`));
+		};
+		const draw = (frame: HTMLElement, t: Topology, largest: number) => {
+			if (!t.services.length) {
+				frame.innerHTML = '<p class="tb-empty">Add a service to see your environment drawn.</p>';
+				return undefined;
+			}
+			const s = scene(t);
+			frame.innerHTML = figureHTML(s, {
+				name: `${t.environment}, with stormbreaker`,
+				title: `${t.environment}, with stormbreaker on top`,
+				text: `${t.services.length} services take part; ${t.dependencies.length} dependencies.`,
+				legend: [
+					{ kind: 'coord', label: 'the suite, to the orchestrator' },
+					{ kind: 'notify', label: 'notified' },
+					{ kind: 'traffic', label: 'the load' },
+					{ kind: 'own', label: 'cleanup' },
+				],
+			});
+			frame.dataset.columns = String(s.width);
+			fit(frame, s.width, largest);
+			return startDiagram(frame.querySelector<HTMLElement>('[data-adg]')!);
+		};
+		const renderView = () => {
+			const t = tidy(toTopology(state));
+			stopFigure?.();
+			stopFigure = draw(figure, t, 15);
+			list.innerHTML = t.services.length
+				? '<h3>What each party sets up</h3>' + checklist(t).map((p) => `<section><h4>${escape(p.who)}</h4><ul>${p.items.map((i) => `<li>${escape(i)}</li>`).join('')}</ul></section>`).join('')
+				: '';
+		};
+		const renderPreview = () => { stopPreview?.(); stopPreview = draw(preview, tidy(toTopology(state)), 11); };
+		let pending = 0;
+		const changed = (soon = false) => {
+			save();
+			clearTimeout(pending);
+			if (soon) pending = window.setTimeout(renderView, 200);
+			else renderView();
+		};
+
+		// The editor.
+		const seg = (attr: string, id: string, value: boolean, yes: string, no: string, label: string) => `
+			<div class="tb-seg" role="group" aria-label="${escape(label)}">
+				<button type="button" data-${attr}="${id}" data-value="1" aria-pressed="${value}">${yes}</button>
+				<button type="button" data-${attr}="${id}" data-value="0" aria-pressed="${!value}">${no}</button>
+			</div>`;
+		const renderEditor = () => {
+			const callable = (me: ServiceState) => [
+				...state.services.filter((m) => m.id !== me.id && slug(m.name)).map((m) => ({ key: `s:${m.id}`, label: slug(m.name), dep: false })),
+				...state.dependencies.filter((d) => slug(d.name)).map((d) => ({ key: `d:${d.id}`, label: slug(d.name), dep: true })),
+			];
+			editor.innerHTML = `
+				<section class="tb-sec">
+					<h3>The environment</h3>
+					<div class="tb-pair">
+						<label>Name<input data-field="environment" value="${escape(state.environment)}" autocomplete="off" spellcheck="false" /></label>
+						<label>Group<input data-field="group" value="${escape(state.group)}" autocomplete="off" spellcheck="false" /></label>
+					</div>
+					<p class="tb-hint">A group is a flow: the services a run's load goes through.</p>
+				</section>
+				<section class="tb-sec">
+					<h3>Zones</h3>
+					<p class="tb-hint">Regions, availability zones or data centers: wherever a service runs an instance of its own. Press Enter to add.</p>
+					<div class="tb-chips">
+						${state.zones.map((z, i) => `<span class="tb-chip">${escape(z)}<button type="button" data-remove-zone="${i}" aria-label="Remove ${escape(z)}">×</button></span>`).join('')}
+						${state.zones.length < LIMITS.zones ? '<input data-add-zone placeholder="east" aria-label="Add a zone" autocomplete="off" spellcheck="false" />' : ''}
+					</div>
+				</section>
+				<section class="tb-sec">
+					<h3>Services that take part</h3>
+					<p class="tb-hint">Each gets a dispatcher beside it, an instance in each zone it runs in, which prepares for a run and cleans up after it. Tick its zones, and pick what it calls.</p>
+					${state.services.map((m) => `
+						<div class="tb-card">
+							<div class="tb-card-head">
+								<input data-service-name="${m.id}" value="${escape(m.name)}" aria-label="Service name" autocomplete="off" spellcheck="false" />
+								<button type="button" class="tb-x" data-remove-service="${m.id}" aria-label="Remove ${escape(m.name)}">×</button>
+							</div>
+							${state.zones.length ? `<div class="tb-zones" role="group" aria-label="The zones ${escape(m.name)} runs in"><span>runs in</span>${state.zones.map((z) => `<label class="tb-zone"><input type="checkbox" data-zone-of="${m.id}" value="${escape(z)}" ${m.zones.includes(z) ? 'checked' : ''} /> ${escape(z)}</label>`).join('')}${m.zones.some((z) => state.zones.includes(z)) ? '' : '<em>one instance, in no zone</em>'}</div>` : ''}
+							${callable(m).length ? `<div class="tb-calls" role="group" aria-label="What ${escape(m.name)} calls"><span>calls</span>${callable(m).map((o) => `<button type="button" class="tb-call${o.dep ? ' tb-dep' : ''}" data-call="${m.id}" data-to="${o.key}" aria-pressed="${m.calls.includes(o.key)}">${escape(o.label)}</button>`).join('')}</div>` : ''}
+						</div>`).join('')}
+					${state.services.length < LIMITS.services ? '<button type="button" class="tb-add" data-add-service>+ a service</button>' : ''}
+				</section>
+				<section class="tb-sec">
+					<h3>Dependencies</h3>
+					<p class="tb-hint">What the services call that does not take part: another team's service, or something outside the environment. Mock it, and the mock's stubs answer your tests while everything else passes through to it. Or let runs reach it.</p>
+					${state.dependencies.map((d) => `
+						<div class="tb-card${d.mocked ? '' : ' tb-real'}">
+							<div class="tb-card-head">
+								<input data-dependency-name="${d.id}" value="${escape(d.name)}" aria-label="Dependency name" autocomplete="off" spellcheck="false" />
+								<button type="button" class="tb-x" data-remove-dependency="${d.id}" aria-label="Remove ${escape(d.name)}">×</button>
+							</div>
+							<div class="tb-row">
+								${seg('internal', d.id, d.internal, 'internal', 'external', `Whether ${d.name} is in the environment`)}
+								${seg('mocked', d.id, d.mocked, 'mocked', 'reached', `Whether runs reach ${d.name}`)}
+							</div>
+							${d.mocked ? '' : `<p class="tb-warn">${d.internal ? 'Runs reach it. If it keeps anything from them, make it a service that takes part.' : 'Runs reach it for real: it must be a sandbox that can take the load.'}</p>`}
+						</div>`).join('')}
+					${state.dependencies.length < LIMITS.dependencies ? '<button type="button" class="tb-add" data-add-dependency>+ a dependency</button>' : ''}
+				</section>
+				<section class="tb-sec">
+					<h3>The run</h3>
+					<div class="tb-pair">
+						<label>Load goes to<select data-field="target">${state.services.filter((m) => slug(m.name)).map((m) => `<option value="${m.id}" ${m.id === state.target ? 'selected' : ''}>${escape(slug(m.name))}</option>`).join('')}</select></label>
+						<label>Metrics<select data-field="metrics">
+							<option value="per-zone" ${state.metrics === 'per-zone' ? 'selected' : ''}>a Prometheus per zone</option>
+							<option value="per-app" ${state.metrics === 'per-app' ? 'selected' : ''}>a Prometheus per app, per zone</option>
+							<option value="global" ${state.metrics === 'global' ? 'selected' : ''}>one global view</option>
+						</select></label>
+					</div>
+				</section>`;
+		};
+		const svc = (id: string) => state.services.find((m) => m.id === id)!;
+		const dep = (id: string) => state.dependencies.find((d) => d.id === id)!;
+		const addZone = (input: HTMLInputElement) => {
+			const v = slug(input.value);
+			if (!v || state.zones.includes(v)) { input.value = ''; return; }
+			state.zones.push(v);
+			renderEditor();
+			changed();
+			editor.querySelector<HTMLInputElement>('[data-add-zone]')?.focus();
+		};
+		const focusName = (attr: string, id: string) => {
+			const input = editor.querySelector<HTMLInputElement>(`[data-${attr}="${id}"]`);
+			input?.focus();
+			input?.select();
+		};
+
+		editor.addEventListener('input', (e) => {
+			const el = e.target as HTMLInputElement;
+			if (el.dataset.field === 'environment' || el.dataset.field === 'group') { state[el.dataset.field] = el.value; changed(true); }
+			if (el.dataset.serviceName) { svc(el.dataset.serviceName).name = el.value; changed(true); }
+			if (el.dataset.dependencyName) { dep(el.dataset.dependencyName).name = el.value; changed(true); }
+		});
+		editor.addEventListener('change', (e) => {
+			const el = e.target as HTMLInputElement & HTMLSelectElement;
+			if (el.dataset.field === 'target') state.target = el.value;
+			if (el.dataset.field === 'metrics') state.metrics = el.value as Topology['metrics'];
+			if (el.dataset.zoneOf) {
+				const m = svc(el.dataset.zoneOf);
+				m.zones = el.checked ? [...new Set([...m.zones, el.value])] : m.zones.filter((z) => z !== el.value);
+				renderEditor();
+			}
+			// A renamed service or dependency shows under its new name wherever it can be called.
+			if (el.dataset.serviceName || el.dataset.dependencyName) renderEditor();
+			changed();
+		});
+		editor.addEventListener('keydown', (e) => {
+			const el = e.target as HTMLInputElement;
+			if (e.key === 'Enter' && 'addZone' in el.dataset) { e.preventDefault(); addZone(el); }
+		});
+		editor.addEventListener('focusout', (e) => {
+			const el = e.target as HTMLInputElement;
+			if ('addZone' in el.dataset && el.value.trim()) addZone(el);
+		});
+		editor.addEventListener('click', (e) => {
+			const el = (e.target as HTMLElement).closest<HTMLElement>('button');
+			if (!el) return;
+			const d = el.dataset;
+			if (d.removeZone) {
+				const gone = state.zones.splice(Number(d.removeZone), 1)[0];
+				state.services.forEach((m) => (m.zones = m.zones.filter((z) => z !== gone)));
+			}
+			else if (d.removeService) {
+				state.services = state.services.filter((m) => m.id !== d.removeService);
+				state.services.forEach((m) => (m.calls = m.calls.filter((c) => c !== `s:${d.removeService}`)));
+				if (state.target === d.removeService) state.target = state.services[0]?.id ?? '';
+			} else if (d.removeDependency) {
+				state.dependencies = state.dependencies.filter((x) => x.id !== d.removeDependency);
+				state.services.forEach((m) => (m.calls = m.calls.filter((c) => c !== `d:${d.removeDependency}`)));
+			} else if (d.internal) dep(d.internal).internal = d.value === '1';
+			else if (d.mocked) dep(d.mocked).mocked = d.value === '1';
+			else if (d.call && d.to) {
+				const m = svc(d.call);
+				m.calls = m.calls.includes(d.to) ? m.calls.filter((c) => c !== d.to) : [...m.calls, d.to];
+			} else if ('addService' in d) {
+				const id = newId();
+				state.services.push({ id, name: `service-${state.services.length + 1}`, zones: [...state.zones], calls: [] });
+				if (!state.target) state.target = id;
+				renderEditor();
+				changed();
+				focusName('service-name', id);
+				return;
+			} else if ('addDependency' in d) {
+				const id = newId();
+				state.dependencies.push({ id, name: `dependency-${state.dependencies.length + 1}`, internal: true, mocked: true });
+				renderEditor();
+				changed();
+				focusName('dependency-name', id);
+				return;
+			} else return;
+			renderEditor();
+			changed();
+		});
+
+		// Opening and closing, full screen.
+		const open = () => {
+			renderEditor();
+			renderView();
+			dialog.showModal();
+			editor.querySelector<HTMLInputElement>('[data-field="environment"]')?.focus();
+			document.documentElement.classList.add('tb-locked');
+			requestAnimationFrame(() => fit(figure, Number(figure.dataset.columns || 100), 15));
+		};
+		dialog.addEventListener('close', () => {
+			document.documentElement.classList.remove('tb-locked');
+			renderPreview();
+		});
+		root.querySelector('[data-open]')!.addEventListener('click', open);
+		root.querySelector('[data-close]')!.addEventListener('click', () => dialog.close());
+		root.querySelector('[data-example]')!.addEventListener('click', () => {
+			state = fromTopology(EXAMPLE);
+			renderEditor();
+			changed();
+		});
+		const share = root.querySelector<HTMLButtonElement>('[data-share]')!;
+		share.addEventListener('click', async () => {
+			const link = `${location.origin}${location.pathname}#t=${b64(JSON.stringify(toTopology(state)))}`;
+			try {
+				await navigator.clipboard.writeText(link);
+				share.textContent = 'Link copied';
+			} catch {
+				prompt('Copy this link:', link);
+			}
+			setTimeout(() => (share.textContent = 'Copy link'), 1800);
+		});
+		new ResizeObserver(() => {
+			fit(preview, Number(preview.dataset.columns || 100), 11);
+			if (dialog.open) fit(figure, Number(figure.dataset.columns || 100), 15);
+		}).observe(document.body);
+
+		renderPreview();
+		if (shared) open();
+	}
+</script>
+
+<style>
+	.tb { margin: 2rem 0; }
+	.tb-preview :global(.adg) { margin: 0; }
+	.tb-cta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem; margin-top: 1rem; }
+	.tb-primary { padding: 0.6rem 1.1rem; border: 1px solid var(--sb-bolt); border-radius: 8px; background: var(--sb-bolt-soft); color: var(--sl-color-white); font: inherit; font-weight: 600; cursor: pointer; }
+	.tb-primary:hover { background: var(--sb-bolt); color: var(--sl-color-black); }
+	.tb-note { color: var(--sb-muted); font-size: 0.85rem; }
+	.tb-empty { padding: 2rem; color: var(--sb-muted); text-align: center; }
+
+	.tb-dialog { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: var(--sl-color-bg); color: var(--sl-color-gray-2); }
+	.tb-dialog[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+	.tb-dialog::backdrop { background: rgb(0 0 0 / 0.6); }
+	:global(.tb-locked) { overflow: hidden; }
+	.tb-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.7rem 1.25rem; border-bottom: 1px solid var(--sl-color-hairline-light); background: var(--sb-surface-raised); }
+	.tb-top h2 { margin: 0; color: var(--sl-color-white); font-size: 1rem; font-weight: 600; }
+	.tb-actions { display: flex; align-items: center; gap: 0.5rem; }
+	.tb-actions button { padding: 0.35rem 0.75rem; border: 1px solid var(--sl-color-hairline-light); border-radius: 6px; background: transparent; color: var(--sl-color-gray-2); font: inherit; font-size: 0.82rem; cursor: pointer; }
+	.tb-actions button:hover { color: var(--sl-color-white); border-color: var(--sb-border-hover); }
+	.tb-actions .tb-close { padding: 0.2rem 0.6rem; font-size: 1.1rem; line-height: 1; }
+	.tb-body { display: grid; grid-template-columns: minmax(19rem, 24rem) minmax(0, 1fr); min-height: 0; }
+	.tb-editor { overflow: auto; padding: 1rem 1.1rem 2rem; border-right: 1px solid var(--sl-color-hairline-light); background: var(--sb-surface); }
+	.tb-view { overflow: auto; padding: 1.25rem 1.5rem 2rem; }
+
+	.tb-editor :global(.tb-sec) { padding: 0 0 1.1rem; margin: 0 0 1.1rem; border-bottom: 1px solid var(--sl-color-hairline-light); }
+	.tb-editor :global(.tb-sec:last-child) { border-bottom: 0; }
+	.tb-editor :global(h3) { margin: 0 0 0.5rem; color: var(--sl-color-white); font-size: 0.85rem; font-weight: 600; }
+	.tb-editor :global(.tb-hint) { margin: 0 0 0.6rem; color: var(--sb-muted); font-size: 0.75rem; line-height: 1.5; }
+	.tb-editor :global(label) { display: grid; gap: 0.3rem; color: var(--sb-muted); font-size: 0.75rem; }
+	.tb-editor :global(.tb-pair) { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-bottom: 0.5rem; }
+	.tb-editor :global(input:not([type='checkbox'])), .tb-editor :global(select) { width: 100%; min-height: 2rem; padding: 0.25rem 0.5rem; border: 1px solid var(--sl-color-hairline-light); border-radius: 6px; background: var(--sl-color-bg); color: var(--sl-color-white); font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; }
+	.tb-editor :global(input:focus-visible), .tb-editor :global(select:focus-visible), .tb-editor :global(button:focus-visible) { outline: 2px solid var(--sb-focus); outline-offset: 1px; }
+	.tb-editor :global(.tb-chips) { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+	.tb-editor :global(.tb-chip) { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.2rem 0.3rem 0.2rem 0.6rem; border: 1px solid var(--sl-color-hairline-light); border-radius: 999px; background: var(--sl-color-bg); color: var(--sl-color-white); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.78rem; }
+	.tb-editor :global(.tb-chip button) { padding: 0 0.3rem; border: 0; background: transparent; color: var(--sb-muted); font: inherit; cursor: pointer; }
+	.tb-editor :global(.tb-chip button:hover) { color: var(--sl-color-white); }
+	.tb-editor :global(.tb-chips input) { flex: 1 1 6rem; width: auto; min-width: 6rem; }
+	.tb-editor :global(.tb-card) { padding: 0.65rem; margin-bottom: 0.6rem; border: 1px solid var(--sl-color-hairline-light); border-radius: 8px; background: var(--sl-color-bg); }
+	.tb-editor :global(.tb-card.tb-real) { border-color: color-mix(in oklab, var(--sb-ember) 45%, var(--sl-color-hairline-light)); }
+	.tb-editor :global(.tb-card .tb-seg) { margin-top: 0.1rem; }
+	.tb-editor :global(.tb-warn) { margin: 0.5rem 0 0; color: var(--sb-ember); font-size: 0.72rem; line-height: 1.45; }
+	.tb-editor :global(.tb-call.tb-dep) { font-style: italic; }
+	.tb-editor :global(.tb-card-head) { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
+	.tb-editor :global(.tb-card-head input) { font-weight: 600; }
+	.tb-editor :global(.tb-x) { flex: none; width: 2rem; border: 1px solid var(--sl-color-hairline-light); border-radius: 6px; background: transparent; color: var(--sb-muted); font: inherit; cursor: pointer; }
+	.tb-editor :global(.tb-x:hover) { color: var(--sl-color-white); }
+	.tb-editor :global(.tb-row) { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; }
+	.tb-editor :global(.tb-seg) { display: inline-flex; border: 1px solid var(--sl-color-hairline-light); border-radius: 6px; overflow: hidden; }
+	.tb-editor :global(.tb-seg button) { padding: 0.25rem 0.55rem; border: 0; background: transparent; color: var(--sb-muted); font: inherit; font-size: 0.75rem; cursor: pointer; }
+	.tb-editor :global(.tb-seg button[aria-pressed='true']) { background: var(--sb-bolt-soft); color: var(--sl-color-white); }
+	.tb-editor :global(.tb-switch) { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--sl-color-gray-2); font-size: 0.78rem; }
+	.tb-editor :global(.tb-zones) { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; margin-top: 0.1rem; }
+	.tb-editor :global(.tb-zones span) { color: var(--sb-muted); font-size: 0.72rem; }
+	.tb-editor :global(.tb-zones em) { color: var(--sl-color-gray-4); font-size: 0.72rem; }
+	.tb-editor :global(.tb-zone) { display: inline-flex; flex-direction: row; align-items: center; gap: 0.3rem; color: var(--sl-color-white); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.75rem; }
+	.tb-editor :global(.tb-calls) { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-top: 0.55rem; }
+	.tb-editor :global(.tb-calls span) { margin-right: 0.15rem; color: var(--sb-muted); font-size: 0.72rem; }
+	.tb-editor :global(.tb-call) { padding: 0.15rem 0.55rem; border: 1px dashed var(--sl-color-hairline-light); border-radius: 999px; background: transparent; color: var(--sb-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.72rem; cursor: pointer; }
+	.tb-editor :global(.tb-call[aria-pressed='true']) { border: 1px solid var(--sb-ember); background: color-mix(in oklab, var(--sb-ember) 18%, transparent); color: var(--sl-color-white); }
+	.tb-editor :global(.tb-add) { width: 100%; padding: 0.45rem; border: 1px dashed var(--sl-color-hairline-light); border-radius: 8px; background: transparent; color: var(--sb-muted); font: inherit; font-size: 0.8rem; cursor: pointer; }
+	.tb-editor :global(.tb-add:hover) { color: var(--sl-color-white); border-color: var(--sb-border-hover); }
+
+	.tb-view :global(.adg) { margin: 0; }
+	.tb-list { max-width: 56rem; }
+	.tb-list :global(h3) { margin: 1.5rem 0 0.5rem; color: var(--sl-color-white); font-size: 1.1rem; font-weight: 600; }
+	.tb-list :global(section) { margin: 0.75rem 0 0; }
+	.tb-list :global(h4) { margin: 0; color: var(--sl-color-white); font-size: 0.88rem; }
+	.tb-list :global(ul) { margin: 0.3rem 0 0; padding-inline-start: 1.2rem; color: var(--sl-color-gray-2); font-size: 0.85rem; line-height: 1.65; }
+
+	@media (max-width: 56rem) {
+		.tb-body { grid-template-columns: 1fr; grid-template-rows: auto auto; overflow: auto; }
+		.tb-editor { overflow: visible; border-right: 0; border-bottom: 1px solid var(--sl-color-hairline-light); }
+		.tb-view { overflow: visible; }
+		.tb-actions [data-example] { display: none; }
+	}
+</style>

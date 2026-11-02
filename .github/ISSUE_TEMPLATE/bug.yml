@@ -1,0 +1,22 @@
+name: Bug report
+description: Something in stormbreaker behaves incorrectly.
+labels: [bug, triage]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations: {required: true}
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest feature file, axx.yaml or orchestrator/dispatcher configuration that shows the problem.
+      render: gherkin
+    validations: {required: true}
+  - type: textarea
+    id: version
+    attributes:
+      label: "`stormbreaker version --json`"
+      render: json
+    validations: {required: true}

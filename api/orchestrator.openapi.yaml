@@ -1,0 +1,1014 @@
+openapi: 3.1.0
+info:
+  title: stormbreaker orchestrator
+  version: "0"
+  summary: Coordinates operational acceptance runs in one shared environment.
+  description: |
+    One orchestrator runs per shared environment. It keeps the registry of dispatchers and their
+    leases, each run's readiness gate, its footprint (the append-only claims of what the run
+    created) and its journal, and it notifies dispatchers of what happens to the runs of their
+    groups.
+
+    A suite opens a run for a group, reports the identities its streams will create, waits for
+    the readiness gate to open, sends its traffic, then publishes traffic-complete, settled and
+    cleanup-ready, and waits for the run to close. Dispatchers prepare before the traffic and
+    clean up after it, reporting what they claimed.
+
+    The orchestrator never blocks traffic itself: the readiness gate is a fact the suite reads.
+    Every transition is recorded before it is notified, and every operation is idempotent.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+
+security:
+  - bearer: []
+
+tags:
+  - name: groups
+    description: Named sets of dispatchers. Every dispatcher in a group is notified of every run opened for it.
+  - name: dispatchers
+    description: Dispatcher instances, registered with a lease they renew by registering again.
+  - name: runs
+    description: Runs, their lifecycle, and their readiness gate.
+  - name: footprint
+    description: What a run created, claimed by the suite and the dispatchers.
+  - name: events
+    description: The event feed, the backstop for notifications that never arrived.
+  - name: service
+    description: Health and this document.
+
+paths:
+  /metrics:
+    get:
+      tags: [service]
+      operationId: metrics
+      summary: The orchestrator's metrics, in Prometheus's text format.
+      description: |
+        What its runs are doing (by state, holding their groups, still cleaning up past the hold),
+        the claims it keeps, its notifications, its dispatcher instances, its store's size, and
+        its volume's free bytes against its reserve (ADR 0016). Counts only: no run's or team's
+        name.
+      security: []
+      responses:
+        "200":
+          description: The metrics.
+          content:
+            text/plain:
+              schema: {type: string}
+  /healthz:
+    get:
+      tags: [service]
+      operationId: health
+      summary: Whether the orchestrator and its database answer.
+      security: []
+      responses:
+        "200":
+          description: It answers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, protocol]
+                properties:
+                  status: {type: string, const: ok}
+                  protocol: {type: integer, description: The protocol version it speaks.}
+        "503": {$ref: "#/components/responses/Problem"}
+
+  /openapi.yaml:
+    get:
+      tags: [service]
+      operationId: openapiYAML
+      summary: This document, in YAML.
+      security: []
+      responses:
+        "200":
+          description: The document.
+          content:
+            application/yaml:
+              schema: {type: string}
+
+  /openapi.json:
+    get:
+      tags: [service]
+      operationId: openapiJSON
+      summary: This document, in JSON.
+      security: []
+      responses:
+        "200":
+          description: The document.
+          content:
+            application/json:
+              schema: {type: object}
+
+  /groups:
+    post:
+      tags: [groups]
+      operationId: createGroup
+      summary: Create a group.
+      description: Creating a group that exists changes nothing. Groups are also created when a dispatcher joins one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateGroup"}
+      responses:
+        "201":
+          description: The group.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Group"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    get:
+      tags: [groups]
+      operationId: listGroups
+      summary: List the groups and their dispatchers.
+      responses:
+        "200":
+          description: The groups, by name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/Group"}
+        "401": {$ref: "#/components/responses/Problem"}
+
+  /groups/{group}/dispatchers:
+    parameters:
+      - $ref: "#/components/parameters/group"
+    get:
+      tags: [groups]
+      operationId: listMembers
+      summary: List a group's dispatchers.
+      description: A group that does not exist has none.
+      responses:
+        "200":
+          description: The dispatchers' names.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {type: string}
+        "401": {$ref: "#/components/responses/Problem"}
+
+  /groups/{group}/dispatchers/{name}:
+    parameters:
+      - $ref: "#/components/parameters/group"
+      - $ref: "#/components/parameters/dispatcher"
+    put:
+      tags: [groups]
+      operationId: joinGroup
+      summary: Add a dispatcher to a group.
+      description: The dispatcher needs a live instance. The group is created if it does not exist.
+      responses:
+        "204": {description: The dispatcher is in the group.}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+    delete:
+      tags: [groups]
+      operationId: leaveGroup
+      summary: Take a dispatcher out of a group.
+      responses:
+        "204": {description: The dispatcher is not in the group.}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+
+  /dispatchers:
+    post:
+      tags: [dispatchers]
+      operationId: register
+      summary: Register a dispatcher instance, or renew its lease.
+      description: |
+        A registration is a lease: an instance that stops registering is no longer live, so
+        nothing waits on it. The secret signs the notifications sent to the callback URL and is
+        never returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Registration"}
+      responses:
+        "201":
+          description: The instance, and when its lease expires.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Dispatcher"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    get:
+      tags: [dispatchers]
+      operationId: listDispatchers
+      summary: List the registered dispatcher instances.
+      responses:
+        "200":
+          description: The instances, by name and instance.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/Dispatcher"}
+        "401": {$ref: "#/components/responses/Problem"}
+
+  /runs:
+    get:
+      tags: [runs]
+      operationId: listRuns
+      summary: List runs, newest first.
+      description: |
+        For operators: runs by state and group, where each is, since when, and whether it holds
+        its group. Ask again with the page's before for older runs.
+      parameters:
+        - {name: state, in: query, description: "A state to list; repeat for several. All, if none.", schema: {type: string, enum: [opened, traffic-complete, settled, cleanup, closed]}, style: form, explode: true}
+        - {name: group, in: query, description: "Only this group's runs.", schema: {type: string}}
+        - {name: before, in: query, description: "Only runs opened before this time, in Unix milliseconds: a page's before.", schema: {type: integer, format: int64}}
+        - {name: limit, in: query, description: "The most runs on a page.", schema: {type: integer, minimum: 1, maximum: 1000, default: 100}}
+      responses:
+        "200":
+          description: A page of runs.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RunList"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [runs]
+      operationId: openRun
+      summary: Open a run for a group.
+      description: |
+        Every live instance of every dispatcher in the group is put on the run and notified
+        (run.opened). A required dispatcher must be in the group and have a live instance.
+
+        Runs never overlap on a dispatcher (ADR 0015). A run holds every dispatcher of its group
+        from its opening until it closes, or until its cleanup outlasts the orchestrator's cleanup
+        hold. A run whose group is held, or shares a dispatcher with a group that is, is refused
+        with 409, and the problem's conflictsWith names the run it would overlap. Try again once
+        that run no longer holds (its holds is false).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/OpenRun"}
+      responses:
+        "201":
+          description: The run.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Run"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "507": {$ref: "#/components/responses/Problem"}
+
+  /runs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/run"
+    get:
+      tags: [runs]
+      operationId: getRun
+      summary: Read a run, with its readiness gate.
+      description: Without its footprint, which grows with the run; read that a page at a time.
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Run"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+
+  /runs/{id}/events:
+    parameters:
+      - $ref: "#/components/parameters/run"
+    post:
+      tags: [runs]
+      operationId: publish
+      summary: Publish a lifecycle event the suite sends.
+      description: |
+        A run only moves forward: run.traffic-complete closes its window, then run.settled, then
+        run.cleanup-ready. run.abandoned gives the run up and opens cleanup at once. Publishing
+        the run's current phase again notifies again and changes nothing else.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PublishEvent"}
+      responses:
+        "202":
+          description: The event, recorded and being notified.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Event"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+
+  /runs/{id}/heartbeat:
+    parameters:
+      - $ref: "#/components/parameters/run"
+    post:
+      tags: [runs]
+      operationId: heartbeat
+      summary: Renew the suite's lease on a run.
+      description: A run whose lease expires is abandoned, and cleaned up all the same.
+      responses:
+        "204": {description: The lease is renewed.}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "410": {$ref: "#/components/responses/Problem"}
+
+  /runs/{id}/progress:
+    parameters:
+      - $ref: "#/components/parameters/run"
+    put:
+      tags: [runs]
+      operationId: sendProgress
+      summary: Say how the run's scenario is going.
+      description: >-
+        The suite's steps, its load and its checks, about once a second while the run is open
+        (ADR 0027). The orchestrator keeps only the latest, in memory, and writes only the final
+        one, with a line in the journal. Nothing waits on it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Progress"}
+      responses:
+        "204": {description: The progress is kept.}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "410": {$ref: "#/components/responses/Problem"}
+        "413": {$ref: "#/components/responses/Problem"}
+    get:
+      tags: [runs]
+      operationId: progress
+      summary: Read how a run's scenario is going, or went.
+      description: The live progress while its suite sends it, the final one after.
+      responses:
+        "200":
+          description: The latest its suite said.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Progress"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+
+  /runs/{id}/streams:
+    parameters:
+      - $ref: "#/components/parameters/run"
+    post:
+      tags: [runs]
+      operationId: addStream
+      summary: Record a stream the run generates records from.
+      description: With its seed, so that the run's records can be generated again later.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/StreamRef"}
+      responses:
+        "204": {description: The stream is recorded.}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+
+  /runs/{id}/dispatchers/{name}/status:
+    parameters:
+      - $ref: "#/components/parameters/run"
+      - $ref: "#/components/parameters/dispatcher"
+      - $ref: "#/components/parameters/instance"
+    post:
+      tags: [runs]
+      operationId: reportStatus
+      summary: Report a dispatcher instance's status on a run.
+      description: |
+        prepared and completed move the instance's state; in-progress, partial and blocked say
+        how it is getting on. A required instance that reports blocked fails the run.
+
+        A round reads the run, then works from the footprint, and reports the run's
+        footprintVersion as it read it. Prepared and completed count only on the version the
+        footprint is at now: a round that began before the footprint last grew has not seen
+        what grew, however late it reports. A version the footprint has not reached is refused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Status"}
+      responses:
+        "204": {description: The status is recorded.}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+
+  /runs/{id}/footprint/{name}:
+    parameters:
+      - $ref: "#/components/parameters/run"
+      - $ref: "#/components/parameters/dispatcher"
+      - $ref: "#/components/parameters/instance"
+    post:
+      tags: [footprint]
+      operationId: reportFootprint
+      summary: Report footprint entries.
+      description: |
+        From a dispatcher instance on the run, or from the suite under the reserved name
+        "suite". When a report declares something its reporter has not said at that place
+        before, the footprint grew: its footprintVersion goes up, every instance in the group is
+        notified (run.footprint-updated), and the readiness gate waits until every required
+        instance has settled on the new version. A removal is recorded but is not growth. A
+        statement its reporter has already made, the same identities at the same place with the
+        same resolution, is recorded once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/FootprintReport"}
+      responses:
+        "200":
+          description: The report is recorded; whether it grew the footprint.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FootprintResult"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "507": {$ref: "#/components/responses/Problem"}
+
+  /runs/{id}/footprint:
+    parameters:
+      - $ref: "#/components/parameters/run"
+    get:
+      tags: [footprint]
+      operationId: footprintPage
+      summary: Read a page of a run's footprint.
+      description: |
+        The reports made after the cursor, as they were written, in the order they were made:
+        at most the reports asked for, and about a hundred thousand identities at most (a page
+        ends after the report that reaches it, and always has one). Follow next until it is
+        null. A later report from the same instance at the same place supersedes its own
+        earlier one.
+
+        dispatcher, store and locator narrow the walk to the reports a hook derives from
+        (ADR 0024): only those are read and sent. Until still bounds the whole footprint, so
+        a walk narrowed or not ends at the same report.
+      parameters:
+        - name: after
+          in: query
+          description: The cursor from the previous page; 0 to start.
+          schema: {type: integer, format: int64, minimum: 0, default: 0}
+        - name: reports
+          in: query
+          description: How many reports to read; each is as large as it was written.
+          schema: {type: integer, minimum: 1, maximum: 1024, default: 64}
+        - name: until
+          in: query
+          description: |
+            Where the walk ends: the until of its first page. Without it, the run's latest report
+            now, which the page's until gives. A walk sees the footprint as it was when it began,
+            never what is reported while it walks.
+          schema: {type: integer, format: int64, minimum: 0}
+        - name: dispatcher
+          in: query
+          description: Only the reports of these dispatchers; suite is the suite's own. Repeat it for several.
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: {type: string, minLength: 1}
+        - name: store
+          in: query
+          description: Only the reports at this store.
+          schema: {type: string, minLength: 1}
+        - name: locator
+          in: query
+          description: Only the reports at this locator.
+          schema: {type: string, minLength: 1}
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FootprintPage"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "410": {$ref: "#/components/responses/Problem"}
+
+  /runs/{id}/footprint/claims:
+    parameters:
+      - $ref: "#/components/parameters/run"
+    get:
+      tags: [footprint]
+      operationId: claims
+      summary: Read a run's footprint, settled.
+      description: Who claims what, after supersession. Only for runs small enough to hold; read large ones a page at a time.
+      responses:
+        "200":
+          description: The claims, in the order they were first made.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/Claim"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "410": {$ref: "#/components/responses/Problem"}
+
+  /runs/{id}/journal:
+    parameters:
+      - $ref: "#/components/parameters/run"
+    get:
+      tags: [runs]
+      operationId: journal
+      summary: Read a run's journal, the run told as a story.
+      responses:
+        "200":
+          description: The journal, in plain text.
+          content:
+            text/plain:
+              schema: {type: string}
+        "401": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+
+  /events:
+    get:
+      tags: [events]
+      operationId: events
+      summary: Read the event feed.
+      description: The backstop for notifications that never arrived. Ask again with the cursor as since.
+      parameters:
+        - name: since
+          in: query
+          description: The cursor from the previous page; 0 to start (with group, at those groups' unfinished runs).
+          schema: {type: integer, format: int64, minimum: 0, default: 0}
+        - name: group
+          in: query
+          description: Only these groups' events; repeat for several (ADR 0022). Every group's, if none.
+          schema: {type: array, items: {type: string}}
+          style: form
+          explode: true
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 1000, default: 100}
+      responses:
+        "200":
+          description: The events after the cursor, and the cursor to ask with next.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EventFeed"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+
+webhooks:
+  runEvent:
+    post:
+      tags: [events]
+      operationId: notify
+      summary: A notification, sent to every live instance of every dispatcher in a run's group.
+      description: |
+        Thin: a claim check. The receiver reads the run at ref for the rest, and acts on the
+        run's state. Signed as Standard Webhooks with the instance's secret; retried with
+        backoff until a 2xx, and after too many attempts the instance is unreachable for that
+        run. Notifications can arrive more than once and out of order; ids tell repeats apart.
+      parameters:
+        - name: webhook-id
+          in: header
+          required: true
+          description: The event's id.
+          schema: {type: string}
+        - name: webhook-timestamp
+          in: header
+          required: true
+          description: When it was signed, in Unix seconds.
+          schema: {type: string}
+        - name: webhook-signature
+          in: header
+          required: true
+          description: '"v1," and the base64 HMAC-SHA256 of "<id>.<timestamp>.<body>".'
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Event"}
+      responses:
+        "200": {description: Received. Any 2xx will do.}
+        "401": {description: The signature does not match; the orchestrator tries again later.}
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: The orchestrator's token, when it is configured with one.
+
+  parameters:
+    group:
+      name: group
+      in: path
+      required: true
+      schema: {type: string}
+    dispatcher:
+      name: name
+      in: path
+      required: true
+      description: A dispatcher's name, or "suite" for the suite's own reports.
+      schema: {type: string}
+    run:
+      name: id
+      in: path
+      required: true
+      schema: {type: string}
+      example: run-1a2b3c4d
+    instance:
+      name: instance
+      in: query
+      description: Which instance of the dispatcher is reporting. Optional for "suite".
+      schema: {type: string}
+
+  responses:
+    Problem:
+      description: Why the request was refused (RFC 9457).
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+
+  schemas:
+    Problem:
+      type: object
+      required: [title, status]
+      properties:
+        type: {type: string}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        conflictsWith:
+          type: string
+          description: On a 409 refusing to open a run, the run it would overlap (ADR 0015).
+
+    CreateGroup:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1}
+
+    Group:
+      type: object
+      required: [name, dispatchers]
+      properties:
+        name: {type: string}
+        dispatchers:
+          type: array
+          items: {type: string}
+
+    Registration:
+      type: object
+      required: [name, instance, team, callbackUrl, secret, protocol]
+      properties:
+        name: {type: string, minLength: 1, description: 'The dispatcher, e.g. "tracking". Not "suite".'}
+        instance: {type: string, minLength: 1, description: "Which instance of it: a stable name, such as its region or partition, never its pod's (ADR 0021)."}
+        protocol: {type: integer, description: "The protocol version the dispatcher speaks; one this orchestrator does not is refused with 422 (ADR 0021)."}
+        team: {type: string, minLength: 1}
+        callbackUrl: {type: string, format: uri, description: Where notifications are sent.}
+        secret:
+          type: string
+          writeOnly: true
+          pattern: "^whsec_"
+          description: Signs the notifications. "whsec_" and the key in base64 (Standard Webhooks).
+
+    Dispatcher:
+      type: object
+      required: [name, instance, team, callbackUrl, leaseExpiresAt]
+      properties:
+        name: {type: string}
+        instance: {type: string}
+        team: {type: string}
+        callbackUrl: {type: string}
+        leaseExpiresAt: {type: string, format: date-time}
+
+    Progress:
+      type: object
+      description: How a run's suite says its scenario is going (ADR 0027).
+      required: [scenario, steps]
+      properties:
+        scenario: {type: string, minLength: 1, description: The scenario's name.}
+        feature: {type: string, description: "Where it is: its file and line."}
+        status: {type: string, description: "The scenario's, once it has one: passed, failed or skipped."}
+        steps:
+          type: array
+          items: {$ref: "#/components/schemas/StepProgress"}
+        load:
+          type: array
+          items: {$ref: "#/components/schemas/LoadProgress"}
+        checks:
+          type: array
+          items: {$ref: "#/components/schemas/CheckResult"}
+        final: {type: boolean, description: "The suite's last word, sent before it closes the run."}
+        at: {type: string, format: date-time, description: When the orchestrator received it; it sets it.}
+
+    StepProgress:
+      type: object
+      required: [keyword, text]
+      properties:
+        keyword: {type: string}
+        text: {type: string}
+        status: {type: string, description: "Empty until it runs; running; then passed, failed, skipped, pending, undefined or ambiguous."}
+        error: {type: string}
+
+    LoadProgress:
+      type: object
+      description: The load one stream sends, as the suite sees it.
+      required: [stream, protocol, target, rate, planned, sent, inFlight, failed]
+      properties:
+        stream: {type: string}
+        protocol: {type: string, description: "How it is sent: rest, kafka."}
+        target: {type: string, description: "Where to: a service, or a topic."}
+        rate: {type: number, description: The declared arrival rate, a second.}
+        planned: {type: integer, description: The records the run sends in all.}
+        sent: {type: integer}
+        inFlight: {type: integer, description: Records sent and not answered yet.}
+        failed: {type: integer, description: "Records that failed: an error, a timeout, or a status the step does not accept."}
+        latency: {$ref: "#/components/schemas/Latency"}
+        done: {type: boolean, description: The stream has sent everything, or stopped.}
+
+    Latency:
+      type: object
+      description: Quantiles, in milliseconds.
+      required: [p50, p90, p99, max]
+      properties:
+        p50: {type: number}
+        p90: {type: number}
+        p99: {type: number}
+        max: {type: number}
+
+    CheckResult:
+      type: object
+      required: [check, status]
+      properties:
+        check: {type: string, description: What it checked.}
+        source: {type: string, description: Where it looked.}
+        status: {type: string, description: "waiting while it judges within its patience; then passed or failed."}
+        found: {type: string, description: What it found.}
+
+    StreamRef:
+      type: object
+      required: [name, seed]
+      properties:
+        name: {type: string, minLength: 1}
+        seed: {type: string}
+
+    OpenRun:
+      type: object
+      required: [initiator, group, protocol]
+      properties:
+        initiator: {type: string, minLength: 1, description: Who opens the run.}
+        protocol: {type: integer, description: "The protocol version the suite speaks; one this orchestrator does not is refused with 422 (ADR 0021)."}
+        group: {type: string, minLength: 1}
+        requires:
+          type: array
+          description: The dispatchers whose every instance must be prepared before traffic flows.
+          items: {type: string}
+        streams:
+          type: array
+          items: {$ref: "#/components/schemas/StreamRef"}
+
+    Gate:
+      type: object
+      required: [open]
+      properties:
+        open: {type: boolean}
+        waiting:
+          type: array
+          description: The required instances the gate waits on, and why.
+          items: {type: string}
+
+    RunDispatcher:
+      type: object
+      required: [name, instance, required, state, footprintVersion]
+      properties:
+        name: {type: string}
+        instance: {type: string}
+        required: {type: boolean}
+        state: {type: string, enum: [notified, acknowledged, prepared, completed, unreachable]}
+        lastStatus: {type: string, enum: [prepared, in-progress, partial, blocked, completed]}
+        evidence: {type: string}
+        detail: {type: string}
+        lastReportAt: {type: string, format: date-time}
+        footprintVersion:
+          type: integer
+          format: int64
+          description: The footprint version the instance's last prepared or completed round began from.
+
+    RunList:
+      type: object
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items: {$ref: "#/components/schemas/RunSummary"}
+        before:
+          type: integer
+          format: int64
+          description: The cursor for the next page; absent when there are no more.
+
+    RunSummary:
+      type: object
+      required: [id, group, state, initiator, failed, abandoned, holds, unfinished, claims, openedAt]
+      properties:
+        id: {type: string}
+        group: {type: string}
+        state: {type: string, enum: [opened, traffic-complete, settled, cleanup, closed]}
+        initiator: {type: string}
+        failed: {type: boolean}
+        abandoned: {type: boolean}
+        holds: {type: boolean, description: Whether it holds its group's dispatchers (ADR 0015).}
+        unfinished: {type: boolean, description: Whether it closed at the cleanup deadline (ADR 0023).}
+        claims: {type: integer, format: int64}
+        openedAt: {type: string, format: date-time}
+        cleanupAt: {type: string, format: date-time, description: When it went to cleanup.}
+        closedAt: {type: string, format: date-time}
+
+    Run:
+      type: object
+      required: [id, group, state, initiator, failed, abandoned, openedAt, windowFrom, gate, dispatchers, streams, footprintVersion, claims, holds, unfinished]
+      properties:
+        id: {type: string}
+        group: {type: string}
+        state:
+          type: string
+          enum: [opened, traffic-complete, settled, cleanup, closed]
+          description: A run that fails its gate, or is abandoned, goes to cleanup at once; failed and abandoned say why.
+        initiator: {type: string}
+        failed: {type: boolean}
+        failReason: {type: string}
+        abandoned: {type: boolean}
+        openedAt: {type: string, format: date-time}
+        windowFrom: {type: string, format: date-time}
+        windowTo: {type: string, format: date-time}
+        gate: {$ref: "#/components/schemas/Gate"}
+        dispatchers:
+          type: array
+          items: {$ref: "#/components/schemas/RunDispatcher"}
+        streams:
+          type: array
+          items: {$ref: "#/components/schemas/StreamRef"}
+        footprintUpdatedAt:
+          type: string
+          format: date-time
+          description: When the footprint last grew.
+        footprintVersion:
+          type: integer
+          format: int64
+          description: >-
+            Counts the times the footprint grew, that is, something new was declared. The gate counts
+            an instance only when it is prepared in a round that began from this version.
+        claims:
+          type: integer
+          format: int64
+          description: The identities claimed into the footprint, counted as they were written.
+        cleanupAt: {type: string, format: date-time, description: When it went to cleanup.}
+        closedAt: {type: string, format: date-time, description: When it closed.}
+        holds:
+          type: boolean
+          description: >-
+            Whether the run holds its group's dispatchers: from its opening until it closes, or until
+            its cleanup outlasts the orchestrator's cleanup hold. No other run opens on a dispatcher a
+            run holds (ADR 0015).
+        unfinished:
+          type: boolean
+          description: >-
+            Whether the run closed at the orchestrator's cleanup deadline, with instances that never
+            completed: what they claimed is not answered for (ADR 0023).
+
+    PublishEvent:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [run.traffic-complete, run.settled, run.cleanup-ready, run.abandoned]
+
+    Event:
+      type: object
+      required: [id, runId, type, time, ref]
+      properties:
+        id: {type: string}
+        runId: {type: string}
+        type:
+          type: string
+          enum: [run.opened, run.footprint-updated, run.traffic-complete, run.settled, run.cleanup-ready, run.failed, run.abandoned]
+        time: {type: string, format: date-time}
+        ref: {type: string, description: Where to read the run.}
+
+    EventFeed:
+      type: object
+      required: [events, cursor]
+      properties:
+        events:
+          type: array
+          items: {$ref: "#/components/schemas/Event"}
+        cursor: {type: integer, format: int64}
+
+    Status:
+      type: object
+      required: [state]
+      properties:
+        state: {type: string, enum: [prepared, in-progress, partial, blocked, completed]}
+        evidence: {type: string, description: How the instance knows, e.g. "cleanup verified at …".}
+        detail: {type: string}
+        footprintVersion:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >-
+            The run's footprintVersion when the round behind this status began. Prepared and completed
+            need it: a round that began before the footprint last grew has not seen what grew.
+
+    FootprintEntry:
+      type: object
+      required: [store, locator, identities, resolution]
+      properties:
+        store: {type: string, minLength: 1, description: 'Where the identities live, e.g. "tracking-db".'}
+        locator: {type: string, minLength: 1, description: 'Where in the store, e.g. "public.tracking".'}
+        identities:
+          type: array
+          items: {type: string}
+        resolution:
+          type: string
+          enum: [expected, removed-verified, clean-by]
+          description: Declared before traffic; removed and checked gone; or promised gone by cleanBy.
+        cleanBy: {type: string, format: date}
+
+    FootprintReport:
+      type: object
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items: {$ref: "#/components/schemas/FootprintEntry"}
+
+    FootprintResult:
+      type: object
+      required: [grew]
+      properties:
+        grew:
+          type: boolean
+          description: Whether the report declared something its reporter had not said at that place before, so that the footprint's version went up.
+
+    Claim:
+      type: object
+      description: One identity at one place, as one instance claims it, with what that instance last said of it there.
+      required: [dispatcher, instance, store, locator, identity, resolution]
+      properties:
+        dispatcher: {type: string}
+        instance: {type: string}
+        store: {type: string}
+        locator: {type: string}
+        identity: {type: string}
+        resolution: {type: string, enum: [expected, removed-verified, clean-by]}
+        cleanBy: {type: string, format: date, description: 'With clean-by: the date it is promised gone by.'}
+
+    Report:
+      type: object
+      description: One footprint report as it was written, with what its reporter said of its identities.
+      required: [dispatcher, instance, store, locator, identities, resolution]
+      properties:
+        dispatcher: {type: string}
+        instance: {type: string}
+        store: {type: string}
+        locator: {type: string}
+        identities:
+          type: array
+          items: {type: string}
+        resolution: {type: string, enum: [expected, removed-verified, clean-by]}
+        cleanBy: {type: string, format: date, description: 'With clean-by: the date it is promised gone by.'}
+
+    FootprintPage:
+      type: object
+      required: [reports, next, until]
+      properties:
+        reports:
+          type: array
+          items: {$ref: "#/components/schemas/Report"}
+        next:
+          type: [integer, "null"]
+          format: int64
+          description: The cursor for the next page; null when this page is empty.
+        until:
+          type: integer
+          format: int64
+          description: Where the walk ends; pass it with the next pages.

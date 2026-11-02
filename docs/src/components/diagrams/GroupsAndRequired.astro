@@ -1,0 +1,12 @@
+---
+// A group's required dispatchers hold the gate; every member holds close (scenes-org.ts).
+import AsciiDiagram from './AsciiDiagram.astro';
+import { groupsAndRequired } from './scenes-org';
+
+interface Props {
+	caption?: string;
+}
+const { caption = 'Required dispatchers hold the gate. Every member, required or not, is on the run, and the run closes only when every one has completed.' } = Astro.props;
+---
+
+<AsciiDiagram name="groups and required dispatchers" scene={groupsAndRequired.scene} title={groupsAndRequired.title} text={groupsAndRequired.text} caption={caption} />

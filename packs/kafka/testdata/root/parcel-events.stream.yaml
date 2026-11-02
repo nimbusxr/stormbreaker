@@ -1,0 +1,4 @@
+count: 12
+mix:
+  - fixture: parcel-registered#registered
+    weight: 1

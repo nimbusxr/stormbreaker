@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://stormbreaker.nimbusxr.us/sitemap-index.xml

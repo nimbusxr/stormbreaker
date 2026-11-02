@@ -1,0 +1,19 @@
+{
+  "name": "nimbusxr-stormbreaker",
+  "owner": {
+    "name": "NimbusXR",
+    "url": "https://github.com/nimbusxr"
+  },
+  "metadata": {
+    "description": "stormbreaker: operational acceptance testing in shared environments"
+  },
+  "plugins": [
+    {
+      "name": "stormbreaker",
+      "source": "./plugins/stormbreaker",
+      "description": "Skills for writing stormbreaker smoke and load runs (axx scenarios) and the dispatchers that prepare and clean up for them.",
+      "category": "testing",
+      "keywords": ["load-testing", "smoke-testing", "gherkin", "acceptance-testing", "axx"]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+---
+// A dispatcher's two hooks, against the footprint (scenes.ts).
+import AsciiDiagram from './AsciiDiagram.astro';
+import { DIAGRAMS } from './descriptions';
+import { dispatcherHooks } from './scenes';
+
+interface Props {
+	caption?: string;
+}
+const { caption = 'The footprint is the run’s ledger: append-only, every claim signed by who made it. A team only ever removes what it declared itself.' } = Astro.props;
+---
+
+<AsciiDiagram name="a dispatcher’s hooks" scene={dispatcherHooks} title={DIAGRAMS.DispatcherHooks.title} text={DIAGRAMS.DispatcherHooks.text} caption={caption} />

@@ -1,0 +1,6 @@
+# A parcel registration: identified by an ordinary UUID each record derives for itself.
+factory:
+  family: json
+identity:
+  - path: reference
+    format: uuid-name-based

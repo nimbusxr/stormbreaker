@@ -1,0 +1,5 @@
+factory: depot-scan
+data:
+  depot: DE-HAM-2
+  weightGrams: 650
+  status: OUT_FOR_DELIVERY

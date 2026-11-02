@@ -1,0 +1,7 @@
+# A JSON event with a JSON Schema: it publishes as JSON, whatever schema it declares.
+factory:
+  family: json
+  schema: parcel-registered.schema.json
+identity:
+  - path: reference
+    format: uuid-name-based

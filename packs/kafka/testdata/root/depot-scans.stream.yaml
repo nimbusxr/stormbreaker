@@ -1,0 +1,6 @@
+count: 40
+mix:
+  - fixture: depot-scan#sorted
+    weight: 3
+  - fixture: depot-scan#out-for-delivery
+    weight: 1

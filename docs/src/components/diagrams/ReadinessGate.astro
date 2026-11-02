@@ -1,0 +1,13 @@
+---
+// The readiness gate, converging on a footprint version (ADR 0013) (scenes.ts).
+import AsciiDiagram from './AsciiDiagram.astro';
+import { DIAGRAMS } from './descriptions';
+import { readinessGate } from './scenes';
+
+interface Props {
+	caption?: string;
+}
+const { caption = 'Rounds converge on a version, never a timer. A deeper cascade of teams only adds rounds.' } = Astro.props;
+---
+
+<AsciiDiagram name="the readiness gate" scene={readinessGate} title={DIAGRAMS.ReadinessGate.title} text={DIAGRAMS.ReadinessGate.text} caption={caption} />

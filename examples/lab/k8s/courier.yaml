@@ -1,0 +1,33 @@
+# The courier, a courier nobody in the environment owns, mocked: axx's WireMock image, given its mappings by a
+# data-only mock image. A profile is a folder of it: --root-dir picks one.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: courier, namespace: stormbreaker-lab}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: courier}}
+  template:
+    metadata: {labels: {app: courier}}
+    spec:
+      initContainers:
+        - name: mocks
+          image: stormbreaker-lab-courier-mock:dev
+          imagePullPolicy: Never
+          command: [sh, -c, "cp -r /mocks/. /work/"]
+          volumeMounts: [{name: mocks, mountPath: /work}]
+      containers:
+        - name: wiremock
+          image: ghcr.io/nimbusxr/axx-wiremock:latest
+          args: [--root-dir, /mocks/default, --port, "8080"]
+          ports: [{containerPort: 8080}]
+          volumeMounts: [{name: mocks, mountPath: /mocks, readOnly: true}]
+      volumes:
+        - name: mocks
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: courier, namespace: stormbreaker-lab}
+spec:
+  selector: {app: courier}
+  ports: [{port: 8080, targetPort: 8080}]

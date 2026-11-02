@@ -1,0 +1,12 @@
+{
+  "type": "record",
+  "name": "DepotScan",
+  "namespace": "com.example.parcels",
+  "fields": [
+    {"name": "scanId", "type": "string"},
+    {"name": "reference", "type": "string"},
+    {"name": "depot", "type": "string"},
+    {"name": "weightGrams", "type": "int"},
+    {"name": "status", "type": {"type": "enum", "name": "ScanStatus", "symbols": ["SORTED", "OUT_FOR_DELIVERY"]}}
+  ]
+}

@@ -1,0 +1,38 @@
+# One orchestrator per environment: a single replica, its database on a small volume.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: orchestrator-data, namespace: stormbreaker-lab}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: orchestrator, namespace: stormbreaker-lab}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: orchestrator}}
+  template:
+    metadata: {labels: {app: orchestrator}}
+    spec:
+      securityContext: {fsGroup: 0}
+      containers:
+        - name: orchestrator
+          image: ghcr.io/nimbusxr/stormbreaker-orchestrator:dev
+          imagePullPolicy: Never
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}}
+          resources: {requests: {memory: 64Mi}, limits: {memory: 512Mi}}
+          volumeMounts: [{name: data, mountPath: /data}]
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: orchestrator-data}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: orchestrator, namespace: stormbreaker-lab}
+spec:
+  type: NodePort
+  selector: {app: orchestrator}
+  ports: [{port: 8080, targetPort: 8080, nodePort: 30080}]

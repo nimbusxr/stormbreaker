@@ -1,0 +1,8 @@
+# The parcel factory: the governing schema and the paths a record is known by. What a record
+# looks like lives beside it: parcel.prototype.yaml for what every record shares, and the
+# colocated *.fixture.yaml files for what each one varies.
+factory:
+  family: json
+  schema: parcel.schema.json
+identity:
+  - path: reference

@@ -1,0 +1,13 @@
+# The lab's cluster: kind create cluster --name stormbreaker --config kind.yaml (scripts/up.sh does).
+# What the suite reaches from the host (the CI runner, in a real environment) is mapped to it.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - {containerPort: 30080, hostPort: 18080} # orchestrator
+      - {containerPort: 30081, hostPort: 18081} # the parcels service's front door
+      - {containerPort: 30091, hostPort: 18091} # prometheus, east
+      - {containerPort: 30092, hostPort: 18092} # prometheus, west
+      - {containerPort: 30093, hostPort: 18093} # kafka, for the suite
+      - {containerPort: 30094, hostPort: 18094} # schema registry

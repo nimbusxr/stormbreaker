@@ -1,0 +1,4 @@
+count: 20
+mix:
+  - fixture: parcel#standard
+    weight: 1

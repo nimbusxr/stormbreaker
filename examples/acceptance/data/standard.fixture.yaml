@@ -1,0 +1,7 @@
+factory: parcel
+data:
+  weightGrams: 2400
+  recipient:
+    name: Ada Lovelace
+    city: Berlin
+    postcode: "10115"

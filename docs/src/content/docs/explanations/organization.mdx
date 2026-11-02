@@ -1,0 +1,86 @@
+---
+title: Stormbreaker in an organization
+description: Who owns what when many teams share environments, what the network must allow, how a team joins, and what happens when something fails.
+---
+
+import OrgEnvironments from '../../../components/diagrams/OrgEnvironments.astro';
+import OrgPaths from '../../../components/diagrams/OrgPaths.astro';
+import GroupsAndRequired from '../../../components/diagrams/GroupsAndRequired.astro';
+import LeaseLapse from '../../../components/diagrams/LeaseLapse.astro';
+
+Stormbreaker sits around the applications an organization already runs, and asks nothing of them ([around your applications](/explanations/around-your-applications/)). This page covers how it fits many teams and several shared environments.
+
+## Who owns what
+
+| Who | Owns | In each environment |
+|---|---|---|
+| The platform team | the orchestrator, its volume, backups, credentials and ingress | one orchestrator |
+| Each team | a dispatcher for each app that keeps data, with its `Prepare` and `Cleanup` hooks | one dispatcher per app, an instance per region or partition |
+| Whoever tests a flow | the suite, its scenarios and the CI job that runs it | nothing: the suite runs on the CI runner |
+| Whoever depends on a partner, or on a team not taking part | the mock that stands in for it | one mock per stand-in |
+
+Environments share nothing: each has its own orchestrator, dispatchers and credentials. A CI job points at one with `STORMBREAKER_ORCHESTRATOR_URL`.
+
+<OrgEnvironments />
+
+## What the network must allow
+
+| From | To | Through |
+|---|---|---|
+| the suite (CI runner) | the orchestrator, the services, Kafka, Prometheus | ingress |
+| each dispatcher | the orchestrator | the cluster |
+| the orchestrator | each dispatcher's callback port, in every team's namespace | the cluster: a NetworkPolicy must let it in |
+| each dispatcher | its own team's stores | the team's namespace |
+
+<OrgPaths />
+
+Neither the orchestrator nor a dispatcher serves TLS: end it at the ingress or in a mesh. When the orchestrator cannot reach a dispatcher, the event feed still carries the run, more slowly.
+
+**Credentials.** The orchestrator takes a principals file with a token per team ([deploy it](/guides/deploy-the-orchestrator/#a-credential-per-team)). A team's CI may act only on its groups' runs, and its dispatchers only as their own names. A dispatcher's name belongs to one team: another team registering it while it is live is refused. Reads are open to every token. Each dispatcher checks its notifications against a signing secret it makes and registers; a notification only says "look at this run", so a forged one costs a pass, never a wrong action.
+
+## How a team joins
+
+- **Taking part is optional.** One team can load test alone, with mocks standing in for its neighbors ([roll it out](/guides/roll-it-out/)).
+- **A team needs a dispatcher if its systems keep anything because of a run's traffic**, directly or downstream. A service that only reads or forwards needs none. A team that keeps data without one is invisible: nothing declares or removes its data. Before a flow's first load test, trace its traffic through every system that keeps something, including topic consumers.
+- **Groups are flows.** A group, such as `delivery`, is the dispatchers that answer for one kind of traffic. A dispatcher joins its groups when it registers (`STORMBREAKER_GROUPS`), and a scenario names its group and required dispatchers in tags:
+
+  ```gherkin
+  @stormbreaker-group/delivery @stormbreaker-requires/parcels,tracking
+  Feature: Parcels hold their load
+  ```
+
+  Required dispatchers hold the gate: a run fails when one is blocked, stale or unreachable. Every member, required or not, prepares and must complete before the run closes.
+- **Instance names are stable.** Name an instance for its region or partition (`east`, `west`), never its pod; the dispatcher-sdk will not start without one. A run's instances are fixed when it opens, so a pod renamed mid-run is not on it, and its region's data is left behind. Run one process per instance name.
+
+<GroupsAndRequired />
+
+## Many teams, one environment
+
+- **Runs never overlap on a dispatcher.** The orchestrator refuses a run that would share a dispatcher with one that still holds it, and the suite waits its turn (up to `turn`, 30 minutes) with its log naming the run it waits for. An SLO check never reads the load of a run that shares its dispatchers.
+- **Groups with nothing in common run side by side**, each with its own footprint and cleanup.
+- **A cleanup that hangs stops holding its group after 15 minutes** (`--cleanup-hold`), and closes as unfinished after 24 hours (`--cleanup-deadline`), its journal naming who never completed.
+
+## When things fail
+
+These failures were caused on the [lab](/tutorials/quickstart/), one at a time, during a minute of traffic:
+
+| What failed | What happened |
+|---|---|
+| The orchestrator restarted mid-traffic or mid-cleanup | Back in 2 s; the run closed clean. |
+| The orchestrator was down 48 s mid-traffic | Leases lapsed while it was down get one lease to renew; the run passed and its cleanup left nothing. |
+| The orchestrator was down 47 s across the end of the traffic | The suite retried for up to two minutes; the run passed and left nothing. |
+| A dispatcher restarted mid-cleanup | It found the run in the event feed, finished, and the run closed clean. |
+| A dispatcher's pod was replaced mid-run, its instance named for the pod | The run failed, and that region's parcels were left behind. |
+| Notifications could not reach a dispatcher | The event feed carried it; the run closed clean, later. |
+| The CI runner died mid-traffic | The run was abandoned 30 s later, cleaned up, and closed clean. |
+| A consumer was down past its dispatcher's grace | Records arrived after cleanup. The lab's dispatcher now reports them clean-by, a promise its service's retention keeps. |
+
+<LeaseLapse />
+
+The suite's verdict is the safety net: a run that closes without every instance completing fails its scenario and names the instance. Read the journal of every run that did not pass.
+
+## Operating it
+
+- **Upgrades.** One replica, `Recreate` strategy: an upgrade is a restart of about 2 s. It moves its schema forward on start, with no way back, so back the volume up first. Upgrade the orchestrator before dispatchers and suites; they say which protocol they speak and are refused, with what to upgrade, if it does not match ([ADR 0021](https://github.com/nimbusxr/stormbreaker/blob/main/docs/adr/0021-dispatchers-say-who-they-are-and-what-they-speak.md)).
+- **Its data.** SQLite on one volume, every commit on the disk before it is answered. Use the `ReadWriteOncePod` access mode where you can, back up with SQLite's online backup or a write-ahead-log streamer, and [size the volume](/guides/deploy-the-orchestrator/#size-its-volume). There is no failover: while it is down nothing opens or moves, and open runs carry on when it returns.
+- **Watching.** `/healthz`, `/metrics` and JSON logs; `stormbreaker runs` lists runs by state and group. [Deploy the orchestrator](/guides/deploy-the-orchestrator/#watch-it) lists what to alert on.

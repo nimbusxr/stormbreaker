@@ -1,0 +1,60 @@
+---
+title: The run lifecycle
+description: How a run moves from opened to closed, what the readiness gate waits for, and what happens when a run fails or its suite goes silent.
+---
+
+import ReadinessGate from '../../../components/diagrams/ReadinessGate.astro';
+import RunLifecycle from '../../../components/diagrams/RunLifecycle.astro';
+
+A run is one scenario's coordinated test, from its opening to the end of its cleanup.
+
+<RunLifecycle />
+
+| Phase | Marked by | Who acts | What happens |
+|---|---|---|---|
+| Open | `run.opened` | the suite | opens the run for a group, naming the dispatchers it requires; every live instance of every dispatcher in the group is put on the run |
+| Prepare | `run.footprint-updated` | the dispatchers | the suite declares what its streams will create; each dispatcher declares what its systems will derive, and prepares; rounds run until one adds nothing |
+| Traffic | the readiness gate | the suite | traffic flows at the declared rates; the suite renews its lease throughout |
+| Settle | `run.traffic-complete`, `run.settled` | the suite | the window closes; the scenario waits for downstream to drain, if it asks to |
+| Judge | | the suite | criteria are judged over the window: the client view and the platform view |
+| Clean up | `run.cleanup-ready` | every dispatcher | each removes what its systems created and proves it; rounds run until each is complete |
+| Close | `closed` | the orchestrator | every instance completed (or is unreachable), on the footprint as it is now |
+
+## The readiness gate
+
+The footprint has a version, which goes up each time something new is declared. A round reads the run, works from the footprint, and reports the version it began from. The gate is open when every instance of every required dispatcher is prepared, in a round that began from the version the footprint is at now.
+
+<ReadinessGate />
+
+That is a fact, not a timer: such an instance has seen everything there is to derive from and found nothing more to add. A round that began before the footprint last grew counts for nothing, however late it reports. Every instance answers for itself, because only it knows what it prepared.
+
+A removal is not growth. It answers for something already there, and nobody derives from it, so cleanup reports hold nobody up.
+
+The gate fails closed. A required instance fails the run in any of these cases:
+
+- it reports itself blocked;
+- it becomes unreachable (its lease lapses, or its notifications stop arriving and it has gone silent too);
+- it acknowledges the run and then goes silent;
+- it does not prepare by the readiness timeout.
+
+## One run at a time
+
+A run holds every dispatcher in its group, from its opening until it closes. The orchestrator refuses any run that would overlap it: another run in the group, or a run in a group that shares one of its dispatchers. The refusal names the run that holds, and the suite waits its turn. Two load tests on the same services never share a window, so neither's measurements carry the other's load, and no dispatcher prepares for one run while it cleans up another.
+
+A cleanup that outlasts the orchestrator's cleanup hold (15 minutes by default) stops holding: it goes on, and the next run opens beside it. One that outlasts the cleanup deadline (24 hours) closes unfinished, and its journal names the instances that never completed. The run's view says whether it holds, and its journal says when it stopped. See [ADR 0015](https://github.com/nimbusxr/stormbreaker/blob/main/docs/adr/0015-runs-never-overlap-on-a-dispatcher.md).
+
+## Failed and abandoned runs
+
+A run that fails at its gate, or is abandoned, goes to cleanup straight away. `failed` and `abandoned` say why, and whatever was prepared is cleaned up all the same. A run is abandoned when either of these happens:
+
+- **its suite stops renewing its lease**, because the runner died;
+- **its suite gives it up**, because its scenario failed.
+
+Silence is a signal, and the mess is still someone's.
+
+## Rules that hold throughout
+
+- **Every transition is written before it is notified.** A notification never announces something that is not recorded.
+- **Every phase is idempotent.** Notifications can arrive twice, late or out of order. They are claim checks, and a dispatcher reads the run and acts on its state.
+- **A declaration is a pure function of what the hook walks, and of the run.** Otherwise rounds never converge.
+- **A bubble smoke skips all of this.** A scenario that creates nothing opens no run.

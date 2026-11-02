@@ -1,0 +1,25 @@
+---
+title: Topology
+description: What runs where in a stormbreaker environment, and why the suite never runs in the cluster.
+---
+
+import RunTopology from '../../../components/diagrams/RunTopology.astro';
+
+Code runs in three places: the CI runner, the environment's cluster, and each team's namespace in it. Here is a run moving through them.
+
+<RunTopology />
+
+| Where | What | How many |
+|---|---|---|
+| The CI runner | the suite: axx, with stormbreaker's packs, generating streams and driving load | one per run (spreading a run across runners is on the roadmap) |
+| The environment's cluster | the orchestrator, and the mocks of partners nobody there owns | one orchestrator per environment; one mock per partner per environment |
+| Each team's namespace | the team's services, and its dispatcher | one dispatcher per app per environment, or per partition where state is partitioned |
+
+## The rules
+
+- **The suite runs on the runner, never in the cluster.** The runner reaches the front doors, the topics, the metrics and the orchestrator directly, with no proxy, port-forward or tunnel. That reach is a requirement of the environment.
+- **One orchestrator per environment.** It is small, it never blocks traffic itself, and its one writer is what limits it ([scale](/explanations/scale/#what-limits-it)).
+- **A dispatcher per app, not per pod.** A replica of the app is not a dispatcher. A partition of its state might need one.
+- **A mock per partner per environment, inside the cluster only.** It is never exposed. Its admin surface stays in the cluster.
+- **Dependencies are reached through their mock.** Its stubs stop the load, and what they do not match passes through to the real one.
+- **More regions means more URLs, not more machinery.** A Prometheus service lists each region's server. A dispatcher per region answers for its region.

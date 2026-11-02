@@ -1,0 +1,12 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests", ":semanticCommits"],
+  "schedule": ["before 6am on monday"],
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {"description": "Every minor, patch and digest update in one pull request a week.", "matchUpdateTypes": ["minor", "patch", "digest"], "groupName": "all non-major dependencies", "groupSlug": "all-non-major", "automerge": true},
+    {"matchUpdateTypes": ["major"], "dependencyDashboardApproval": true},
+    {"matchManagers": ["github-actions"], "matchUpdateTypes": ["major"], "groupName": "GitHub Actions (major)"},
+    {"description": "axx is what the packs build on: a person reads its release notes before it merges.", "matchPackageNames": ["github.com/nimbusxr/axx"], "automerge": false}
+  ]
+}

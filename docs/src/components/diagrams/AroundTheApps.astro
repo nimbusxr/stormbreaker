@@ -1,0 +1,12 @@
+---
+// Stormbreaker around an environment's applications, which do not change (scenes-org.ts).
+import AsciiDiagram from './AsciiDiagram.astro';
+import { aroundTheApps } from './scenes-org';
+
+interface Props {
+	caption?: string;
+}
+const { caption = 'Your applications stay as they are. Stormbreaker’s pieces sit around them, each team works through its own door, and a mock stands in for whoever sits out.' } = Astro.props;
+---
+
+<AsciiDiagram name="around your applications" scene={aroundTheApps.scene} title={aroundTheApps.title} text={aroundTheApps.text} caption={caption} legend={[{ kind: 'coord', label: 'what stormbreaker adds' }, { kind: 'line', label: 'your applications, unchanged' }, { kind: 'traffic', label: 'traffic' }, { kind: 'own', label: 'a team’s own door' }]} />

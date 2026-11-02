@@ -1,0 +1,8 @@
+# A factory whose records say nothing about their identity: each record derives its own, from the
+# record it is, as an ordinary UUID that nothing marks as test data.
+factory:
+  family: json
+  schema: ../parcel.schema.json
+identity:
+  - path: reference
+    format: uuid-name-based

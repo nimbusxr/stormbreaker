@@ -1,0 +1,5 @@
+factory: parcel
+data:
+  reference: ${ uuid("parcel") }
+  sender: kestrel-books
+  pieces: 1

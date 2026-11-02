@@ -1,0 +1,6 @@
+count: 200
+mix:
+  - fixture: "parcel#standard"
+    weight: 8
+  - fixture: "parcel#bulky"
+    weight: 2

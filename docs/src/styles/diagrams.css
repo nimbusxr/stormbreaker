@@ -1,0 +1,72 @@
+/*
+ * The diagrams (src/components/diagrams/AsciiDiagram.astro): drawn in characters, in a frame like
+ * the code blocks' terminal frames. A color means one thing in every diagram: lightning blue is
+ * coordination with the orchestrator, violet its notifications, ember the traffic, green what a
+ * team does to its own data, red a failure.
+ */
+.adg {
+	--adg-font: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	margin: 2rem 0;
+	border: 1px solid var(--sl-color-hairline-light);
+	border-radius: 0.75rem;
+	background: var(--sb-surface);
+	overflow: hidden;
+}
+.sl-markdown-content .adg { max-width: none; }
+.sl-markdown-content .adg :is(p, pre, figcaption, ul) { margin: 0; }
+/* The page's flow spacing puts a margin above every element after the first: among the controls
+   it pushed all but the first down. */
+.sl-markdown-content .adg-controls > * { margin-top: 0; }
+
+.adg-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 2.4rem; padding: 0.3rem 0.5rem 0.3rem 1rem; border-bottom: 1px solid var(--sl-color-hairline-light); background: var(--sb-surface-raised); font-family: var(--adg-font); font-size: 0.72rem; }
+.adg-name { color: var(--sb-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.adg-name::before { content: '$ '; color: var(--sl-color-gray-4); }
+.adg-controls { display: flex; align-items: center; gap: 0.1rem; }
+.adg-controls button { min-width: 1.75rem; height: 1.75rem; padding: 0 0.35rem; border: 0; border-radius: 4px; background: transparent; color: var(--sb-muted); font: inherit; cursor: pointer; transition: color 120ms, background 120ms; }
+.adg-controls button:hover { color: var(--sl-color-white); background: var(--sb-surface-hover); }
+.adg-controls .adg-num[aria-pressed='true'] { color: var(--sb-bolt); text-decoration: underline; text-underline-offset: 0.3em; }
+.adg-controls .adg-nav { font-size: 0.95rem; }
+.adg-controls button:disabled { opacity: 0.35; cursor: default; background: transparent; }
+
+.adg-caption { padding: 0.85rem 1rem 0; color: var(--sl-color-gray-2); font-size: 0.82rem; line-height: 1.6; min-height: 3.6rem; }
+.adg-caption strong { color: var(--sl-color-white); font-weight: 600; }
+.adg-count { margin-inline-end: 0.6rem; color: var(--sl-color-gray-4); font-family: var(--adg-font); font-size: 0.72rem; }
+
+.adg-stage { overflow-x: auto; padding: 0.9rem 1rem 1rem; }
+.adg-layers { position: relative; width: max-content; margin-inline: auto; }
+.adg-grid { margin: 0; padding: 0; border: 0; background: none; color: var(--sl-color-gray-4); font-family: var(--adg-font); font-size: 0.72rem; font-variant-ligatures: none; line-height: 1.32; letter-spacing: 0; white-space: pre; tab-size: 1; }
+[data-has-hero] .adg-grid { font-size: 0.82rem; }
+.adg figcaption { padding: 0 1rem 0.9rem; color: var(--sb-muted); font-size: 0.78rem; line-height: 1.6; }
+.adg-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; padding: 0 1rem 0.75rem; font-family: var(--adg-font); font-size: 0.7rem; color: var(--sb-muted); list-style: none; }
+.sl-markdown-content .adg-legend li { margin: 0; }
+.adg-legend span { margin-inline-end: 0.4rem; }
+
+/* Each character's kind is its color. */
+.adg .k-line { color: var(--sl-color-gray-4); }
+.adg .k-zone { color: var(--sb-divider); }
+.adg .k-key { color: var(--sl-color-gray-3); }
+.adg .k-title { color: var(--sl-color-white); font-weight: 600; }
+.adg .k-sub { color: var(--sl-color-gray-3); }
+.adg .k-label { color: var(--sb-muted); }
+.adg .k-dim { color: var(--sl-color-gray-4); opacity: 0.45; }
+.adg .k-coord { --k: var(--sb-bolt); color: var(--k); }
+.adg .k-notify { --k: var(--sb-violet); color: var(--k); }
+.adg .k-traffic { --k: var(--sb-ember); color: var(--k); }
+.adg .k-own, .adg .k-ok { --k: var(--sl-color-green); color: var(--k); }
+.adg .k-fail { --k: var(--sl-color-red); color: var(--k); }
+
+/* A lit line pulses the way it goes: a brighter band runs from where it starts to its arrow, and
+   again. The steps themselves never move; a reader who asks for less motion gets none. */
+.adg .adg-pulse { animation: adg-pulse 2.4s linear infinite; animation-delay: calc(var(--p) * 60ms); }
+@keyframes adg-pulse {
+	0% { color: color-mix(in oklab, var(--k, currentColor) 35%, white); text-shadow: 0 0 6px var(--k, currentColor); }
+	14%, 100% { color: var(--k, currentColor); text-shadow: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.adg .adg-pulse { animation: none; }
+}
+
+@media (max-width: 49.99rem) {
+	.adg-bar { flex-wrap: wrap; padding-block: 0.4rem; }
+	.adg-controls .adg-num { min-width: 1.4rem; padding: 0 0.2rem; }
+}

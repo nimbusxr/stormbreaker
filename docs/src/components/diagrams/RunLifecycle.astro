@@ -1,0 +1,13 @@
+---
+// The run lifecycle, state by state, and its two side paths (scenes.ts).
+import AsciiDiagram from './AsciiDiagram.astro';
+import { DIAGRAMS } from './descriptions';
+import { runLifecycle } from './scenes';
+
+interface Props {
+	caption?: string;
+}
+const { caption = 'A run moves forward only, and every run ends in cleanup: a failed or abandoned run is cleaned up all the same.' } = Astro.props;
+---
+
+<AsciiDiagram name="the run lifecycle" scene={runLifecycle} title={DIAGRAMS.RunLifecycle.title} text={DIAGRAMS.RunLifecycle.text} caption={caption} />

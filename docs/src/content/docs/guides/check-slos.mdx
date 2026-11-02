@@ -1,0 +1,67 @@
+---
+title: Check SLOs
+description: Judge latency quantiles and counters over a run's window from Prometheus, per app, per region or from a global view, merged as one Prometheus would.
+---
+
+import PrometheusTopologies from '../../../components/diagrams/PrometheusTopologies.astro';
+
+stormbreaker-prometheus checks what the service's own metrics say over the run's window: the platform view.
+
+```gherkin
+Given the parcels-metrics prometheus service with the following properties:
+  | url            | http://prom-east:9090,http://prom-west:9090 |
+  | minimum-window | 30s                                         |
+When the parcels stream is sent at 50 requests per second
+And the run's traffic is complete
+Then within 30s the increase of http_server_requests_seconds_count over the run is at least 2000
+And within 30s the p99 of http_server_requests_seconds over the run is at most 0.5 seconds
+```
+
+## Where the metrics are
+
+A Prometheus service is one logical service, and the Prometheus servers that hold its metrics in every region it runs in. Environments keep metrics in one of three ways, and each is a `url`, with a `selector` where a server holds more than the service:
+
+<PrometheusTopologies />
+
+| Where the metrics are | `url` | `selector` |
+|---|---|---|
+| **Per app, per region.** Each app runs a Prometheus of its own in each region or zone. | the app's Prometheus in each region or zone | not needed |
+| **Per region.** One Prometheus in each region scrapes every app there. | each region's Prometheus | the app's labels, like `app="parcels"` |
+| **Global.** One view holds every region: Thanos, Mimir, or a central Prometheus. | the one global endpoint | the app's labels; add a region matcher to judge some regions only |
+
+```gherkin
+# Per app, per region: the parcels team's own Prometheus, an HA pair in each region.
+Given the parcels-metrics prometheus service with the following properties:
+  | url | http://parcels-prom-0.eu-1:9090\|http://parcels-prom-1.eu-1:9090,http://parcels-prom-0.eu-2:9090\|http://parcels-prom-1.eu-2:9090 |
+
+# Per region: a shared Prometheus in each region.
+Given the parcels-metrics prometheus service with the following properties:
+  | url      | http://prom.eu-1:9090,http://prom.eu-2:9090 |
+  | selector | app="parcels"                               |
+
+# Global: one view of every region.
+Given the parcels-metrics prometheus service with the following properties:
+  | url      | http://thanos-query:9090 |
+  | selector | app="parcels"            |
+```
+
+- **Every server in `url` is summed.** List each place the service's series are kept once: a series kept in two listed servers is counted twice.
+- **Replicas of one server are separated by `|`.** An HA pair scrapes the same targets, so a check asks the first replica that answers, and never adds the pair up. (In a Gherkin table, write the `|` as `\|`.)
+- **A selector picks the service's series.** Without one, a check reads every series of the metric the server holds, which on a shared or global server is every app's.
+
+Checks combine the servers as one Prometheus would:
+
+- **Counters** are summed.
+- **Histograms** have their buckets summed first, and the quantile is then interpolated as `histogram_quantile` does.
+
+Percentiles are never averaged. Averaging the p99 of a fast region and a slow one understates the slow one: a merged p99 lands where the slow region's requests are.
+
+## The window
+
+A check judges the run's window: from when the run opened to when its traffic was complete. Before then, the window runs to now. The query asks for the window at its end, so what came after the run does not count.
+
+Close the window with `the run's traffic is complete` before checking. A window shorter than the service's `minimum-window` (its scrape interval or more) is refused, however long the check waits: it cannot be judged honestly.
+
+## Patience
+
+`within 30s` is how long a check may keep asking. Scrape lag is waited out, not slept around: the check asks every two seconds until it holds, and then fails with what it last saw.

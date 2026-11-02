@@ -1,0 +1,4 @@
+factory: depot-scan
+data:
+  depot: DE-BER-1
+  weightGrams: 2400

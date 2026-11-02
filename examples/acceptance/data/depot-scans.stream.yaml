@@ -1,0 +1,7 @@
+# Depot scans in Avro: mostly sorting, some out for delivery.
+count: 500
+mix:
+  - fixture: depot-scan#sorted
+    weight: 3
+  - fixture: depot-scan#out-for-delivery
+    weight: 1

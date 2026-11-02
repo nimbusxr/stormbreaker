@@ -1,0 +1,17 @@
+factory: parcel-collection
+# The same parcel the registration named: referenced, never restated.
+data:
+  reference:
+    $ref: ./standard.fixture.yaml#/reference
+  sender:
+    $ref: ./standard.fixture.yaml#/sender
+  pieces: 1
+  country: DE
+  serviceLevel: STANDARD
+metadata:
+  key:
+    $ref: "#/reference"
+  # The same parcel the registration named, so the same trace; its own span, because the
+  # span name differs. Named from the finished payload rather than from metadata - an
+  # expression here may read either.
+  trace: ${ traceparent($data.reference, "booked") }

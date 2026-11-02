@@ -1,0 +1,31 @@
+---
+import Search from '@astrojs/starlight/components/Search.astro';
+import ThemeSelect from './ThemeSelect.astro';
+import VersionSwitch from './VersionSwitch.astro';
+import { Icon } from '@astrojs/starlight/components';
+import { withBase } from '../lib/docs-build';
+
+const isHome = Astro.url.pathname === withBase('/');
+---
+
+{isHome ? (
+	<div class="home-header">
+		<div class="home-brand"><a class="home-wordmark" href={withBase('/')} aria-label="stormbreaker home">storm<span class="wordmark-breaker">breaker</span></a><span class="beta-tag">beta</span></div>
+		<nav aria-label="Main navigation">
+			<a href={withBase('/explanations/why-stormbreaker/')}>docs</a>
+			<VersionSwitch home />
+			<a href="https://github.com/nimbusxr/stormbreaker">github <span aria-hidden="true">↗</span></a>
+			<ThemeSelect />
+		</nav>
+	</div>
+) : (
+	<div class="axe-header">
+		<div class="axe-brand"><span class="brand-name"><a class="site-title sl-flex" href={withBase('/')} aria-label="stormbreaker home"><span>storm<span class="wordmark-breaker">breaker</span></span></a><span class="beta-tag">beta</span></span><span class="brand-divider" aria-hidden="true"></span><span class="brand-caption">docs</span></div>
+		<div class="axe-header-tools">
+			<VersionSwitch />
+			<Search />
+			<ThemeSelect />
+			<a class="github-link" href="https://github.com/nimbusxr/stormbreaker" aria-label="stormbreaker on GitHub"><Icon name="github" size="1.2rem" /><span>GitHub</span><span aria-hidden="true">↗</span></a>
+		</div>
+	</div>
+)}

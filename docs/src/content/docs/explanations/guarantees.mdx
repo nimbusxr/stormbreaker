@@ -1,0 +1,46 @@
+---
+title: Guarantees
+description: What the orchestrator and the dispatchers guarantee about delivery, coordination, determinism and cleanup.
+---
+
+import Delivery from '../../../components/diagrams/Delivery.astro';
+
+## Delivery
+
+<Delivery />
+
+- **Every transition is durable before it is notified.** A transition and the notifications it queues commit in one transaction, and a commit is on the disk before it returns, so no dispatcher hears of something a crash could undo.
+- **What the orchestrator acknowledged, it keeps.** A footprint report, a status or a transition answered with a 2xx survives a crash of the orchestrator's process or node. A scale test kills it with SIGKILL at random moments under load: over 40 rounds and 62,008 acknowledged reports, nothing acknowledged was lost and the database was whole every time. (A dispatcher's lease renewal is the one exception: renewals are written together within a second, and the restart grace covers any a crash loses.)
+- **Notifications are delivered at least once.** They are retried, backing off exponentially with jitter, and sent again after a crash if their delivery was not recorded. After too many attempts the journal says so; an instance that has stopped reporting too is then unreachable for the run, and one still reporting is not. Never dropped silently.
+- **The event feed is the backstop.** A dispatcher reads it on a cadence, from where it left off, and acts on whatever its notifications missed. The feed's cursor never skips an event: events are numbered as they commit, by one writer.
+- **Everything is idempotent.** Notifications are claim checks, and every pass reads the run afresh. A repeat changes nothing.
+- **A dispatcher remembers nothing it needs.** What it has declared, removed or promised is in the footprint, and the dispatcher-sdk reads it back (`Unanswered`), so a dispatcher restarted mid-cleanup carries on where it was, and neither removes nor reports anything twice.
+
+These hold on these assumptions, which the orchestrator's deployment must meet:
+
+- **One orchestrator writes its database.** One replica, `Recreate` on upgrade, and a volume that one pod can mount (`ReadWriteOncePod` where the cluster has it).
+- **The volume honors fsync**: a block volume, not a network file system that acknowledges writes it has not stored.
+- **The volume has room.** The orchestrator keeps a reserve and refuses new growth below it; a write that still finds the disk full fails and rolls back, and nothing already committed is lost.
+- **Backups are copies of a consistent database**: SQLite's online backup, or a tool that streams the write-ahead log. A file copied under a running orchestrator is not a backup.
+
+## Coordination
+
+- **No zombie runs.** A run whose suite stops renewing its lease is abandoned and cleaned up.
+- **No zombie instances.** An instance whose lease lapses is unreachable, so a replica that scaled away holds no run up.
+- **The readiness gate fails closed.** Required instances report afresh on a cadence. A stale, blocked or unreachable one fails the run, and optional ones never hold the gate.
+- **Rounds converge**, because declarations are pure functions of the footprint.
+- **The gate counts a round on the footprint it saw.** A round reports the footprint version it began from, so one that missed the last growth never opens the gate, however late it reports.
+- **Declarations are typed:** a store, a locator, identities and a resolution. Fields the orchestrator does not know are ignored.
+
+## Determinism
+
+- **Record *i* is a pure function of the definition, the seed, the run and *i*.** No random number generator is involved.
+- **Identities are derived per record, collision-free, and linted** before any traffic.
+- **Mock images are pinned by digest.**
+- **What a run created can be recomputed** from its recorded streams and seeds, for as long as the definitions are kept.
+
+## Cleanup
+
+- **Every footprint entry ends removed and verified, or clean by a date.**
+- **No component touches another team's data.** Dispatchers report what their own systems created, as values and places only.
+- **A run passes only when every dispatcher completed its cleanup**, and the journal says who did what.

@@ -1,0 +1,9 @@
+# The packs this suite uses: axx's by name, stormbreaker's by path (a project elsewhere lists them by
+# module: github.com/nimbusxr/stormbreaker/packs/core@v0.1.0).
+packs:
+  - rest
+  - kafka
+  - ../../packs/core
+  - ../../packs/rest
+  - ../../packs/kafka
+  - ../../packs/prometheus

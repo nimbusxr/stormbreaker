@@ -1,0 +1,8 @@
+factory: parcel
+data:
+  serviceLevel: EXPRESS
+  weightGrams: 650
+  recipient:
+    name: Mary Somerville
+    city: Hamburg
+    postcode: "20095"

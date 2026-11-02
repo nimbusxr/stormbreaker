@@ -1,0 +1,7 @@
+# An Avro event: its records publish as Avro, with the Schema Registry, in the Confluent wire format.
+factory:
+  family: avro
+  schema: depot-scan.avsc
+identity:
+  - path: scanId
+    format: uuid-name-based

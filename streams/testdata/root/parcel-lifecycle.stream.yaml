@@ -1,0 +1,9 @@
+# Three keys: two carry a two-message series, one carries a single message.
+count: 3
+mix:
+  - weight: 2
+    series:
+      - parcel#standard
+      - parcel-collection#booked
+  - weight: 1
+    fixture: parcel#bulky

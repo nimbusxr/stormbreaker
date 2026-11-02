@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://axx.nimbusxr.us/schemas/v0/axx.schema.json
+#
+# The stormbreaker UI's acceptance suite (ADR 0026): axx drives the UI in a browser while
+# stormbreaker-core opens the runs it shows. It runs against the lab, with the UI serving at
+# ui.url:
+#   ../../bin/stormbreaker ui serve --environment lab=http://localhost:18080 --addr :18096 &
+#   axx run
+version: 1
+
+run:
+  paths: [features]
+
+resources: ["."]
+
+properties:
+  ui.url: http://localhost:18096
+  parcels.url: http://localhost:18081
+
+packs:
+  stormbreaker-core:
+    url: ${env:STORMBREAKER_ORCHESTRATOR_URL:-http://localhost:18080}
+    token: ${env:STORMBREAKER_TOKEN:-}
+    fixtures: ../acceptance/data

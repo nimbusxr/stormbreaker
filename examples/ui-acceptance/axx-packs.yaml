@@ -1,0 +1,7 @@
+# The packs the UI's acceptance suite uses: axx's web pack drives the UI in a browser, and
+# stormbreaker's own packs open the runs it shows (a project elsewhere lists them by module).
+packs:
+  - web-core
+  - rest
+  - ../../packs/core
+  - ../../packs/rest

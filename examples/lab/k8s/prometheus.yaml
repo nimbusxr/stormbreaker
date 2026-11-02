@@ -1,0 +1,64 @@
+# A Prometheus per region, each scraping that region's parcels service every 5s: the suite judges SLOs
+# across both, merging what they say.
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: prometheus, namespace: stormbreaker-lab}
+data:
+  east.yml: |
+    global: {scrape_interval: 5s}
+    scrape_configs:
+      - job_name: parcels
+        static_configs: [{targets: ["parcels-east:8081"]}]
+  west.yml: |
+    global: {scrape_interval: 5s}
+    scrape_configs:
+      - job_name: parcels
+        static_configs: [{targets: ["parcels-west:8081"]}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: prometheus-east, namespace: stormbreaker-lab}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: prometheus, region: east}}
+  template:
+    metadata: {labels: {app: prometheus, region: east}}
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.53.0
+          args: [--config.file=/etc/prometheus/east.yml]
+          volumeMounts: [{name: config, mountPath: /etc/prometheus}]
+      volumes: [{name: config, configMap: {name: prometheus}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: prometheus-east, namespace: stormbreaker-lab}
+spec:
+  type: NodePort
+  selector: {app: prometheus, region: east}
+  ports: [{port: 9090, targetPort: 9090, nodePort: 30091}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: prometheus-west, namespace: stormbreaker-lab}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: prometheus, region: west}}
+  template:
+    metadata: {labels: {app: prometheus, region: west}}
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.53.0
+          args: [--config.file=/etc/prometheus/west.yml]
+          volumeMounts: [{name: config, mountPath: /etc/prometheus}]
+      volumes: [{name: config, configMap: {name: prometheus}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: prometheus-west, namespace: stormbreaker-lab}
+spec:
+  type: NodePort
+  selector: {app: prometheus, region: west}
+  ports: [{port: 9090, targetPort: 9090, nodePort: 30092}]

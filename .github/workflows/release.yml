@@ -1,0 +1,222 @@
+# SPDX-License-Identifier: Apache-2.0
+# release-please keeps a release PR. Merging it tags the release, and the jobs below publish
+# it. Publishing lives
+# here (not in tag-triggered workflows) so it never depends on whether a tag created
+# through the API starts other workflows.
+#
+# Nothing is published unless the STORMBREAKER_PUBLISH repository variable is "true". Until then,
+# and always for pull requests and manual runs, this is a dry run: release-please reports
+# the release PR it would open, and every component is built and checked as a release
+# would build it, then attached to the run instead of published.
+name: release
+
+on:
+  push:
+    branches: [main]
+  # A dry run for a pull request that changes how releases are made. Not for the release PR,
+  # which changes only versions and the changelog (.release-please-manifest.json): what it
+  # releases is what CI tested, and merging it builds the release for real.
+  pull_request:
+    paths:
+      - .goreleaser.yaml
+      - build/**
+      - release-please-config.json
+      - scripts/release-check.sh
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-24.04
+    # Publishing reads the release app's key from the release-pr environment (main only). A dry
+    # run uses no environment.
+    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.STORMBREAKER_PUBLISH == 'true' && 'release-pr' || '' }}
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      dry-run: ${{ steps.mode.outputs.dry-run }}
+      released: ${{ steps.rp.outputs.release_created || steps.dry.outputs.released }}
+      tag: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          PUBLISH: ${{ vars.STORMBREAKER_PUBLISH }}
+        run: |
+          if [[ "$EVENT" == push && "$REF" == refs/heads/main && "$PUBLISH" == true ]]; then
+            echo "dry-run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "dry-run=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Dry run: nothing is published. Releases from main need the STORMBREAKER_PUBLISH repository variable set to true."
+          fi
+
+      # Publishing. A GitHub App token (not GITHUB_TOKEN) so the release PR triggers CI.
+      - if: steps.mode.outputs.dry-run == 'false'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          # Only what release-please needs: release PRs, labels, tags and releases.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+      - if: steps.mode.outputs.dry-run == 'false'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: rp
+        with:
+          token: ${{ steps.app.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Dry run: the release PR release-please would open, read-only, and every component
+      # built at the version its next release would get.
+      - if: steps.mode.outputs.dry-run == 'true'
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - if: steps.mode.outputs.dry-run == 'true'
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: "node"
+          cache: false # this job also publishes
+      - if: steps.mode.outputs.dry-run == 'true'
+        name: release-please (dry run)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          out=$(mktemp)
+          status=0
+          npx -y release-please@17.11.2 release-pr --dry-run --token "$GH_TOKEN" --repo-url "$REPO" \
+            --target-branch main --config-file release-please-config.json \
+            --manifest-file .release-please-manifest.json >"$out" 2>&1 || status=$?
+          cat "$out"
+          {
+            echo "### release-please (dry run)"
+            echo
+            echo "What release-please would do on \`main\` (it reads the branch on GitHub, not this checkout):"
+            echo
+            echo '```'
+            cat "$out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - if: steps.mode.outputs.dry-run == 'true'
+        id: dry
+        run: echo "released=true" >> "$GITHUB_OUTPUT"
+
+  docs:
+    # The site's root is the latest release's docs: a new release asks for a docs run, which
+    # builds them from its tag (docs.yml). A run started with this token is one GitHub allows.
+    needs: release-please
+    if: needs.release-please.outputs.dry-run == 'false' && needs.release-please.outputs.released == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run docs.yml --repo "$GITHUB_REPOSITORY" --ref main
+
+  # The binaries, archives, checksums, SBOMs, signatures, images and Homebrew cask.
+  goreleaser:
+    needs: release-please
+    if: needs.release-please.outputs.dry-run == 'false' && needs.release-please.outputs.released == 'true'
+    runs-on: ubuntu-24.04
+    # The release environment: main only. Merging the release PR is the approval.
+    environment: release
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      # The Homebrew tap is another repository; the release app writes the cask there.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: tap
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: nimbusxr
+          repositories: homebrew-tap
+          permission-contents: write
+      # No cache in a job that publishes: a restored cache could feed the release.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: "go goreleaser"
+          cache: false
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
+      # Docker Hub's images (the builder's own among them) through Google's mirror.
+      - uses: ./.github/actions/docker-hub-mirror
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: goreleaser release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ needs.release-please.outputs.tag }}
+          HOMEBREW_TAP_TOKEN: ${{ steps.tap.outputs.token }}
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-checksums: dist/checksums.txt
+
+  # The same build in snapshot mode: nothing is pushed, uploaded or signed (keyless signing
+  # would write to the public transparency log). scripts/release-check.sh checks the result.
+  goreleaser-dry-run:
+    needs: release-please
+    if: needs.release-please.outputs.dry-run == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: "go goreleaser"
+          # Tools are cached from main only: pull requests read them.
+          cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      # A dry run publishes nothing, so it can reuse CI's cross-build cache.
+      - uses: ./.github/actions/go-cache
+        with:
+          build: cross
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
+      # Docker Hub's images (the builder's own among them) through Google's mirror.
+      - uses: ./.github/actions/docker-hub-mirror
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - run: GORELEASER_CURRENT_TAG=$(scripts/cli-tag.sh) goreleaser release --snapshot --clean --skip=sign
+      - run: scripts/release-check.sh dist
+        env:
+          RELEASE_CHECK_STRICT: "1"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: stormbreaker-release-dry-run
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sbom.json
+            dist/checksums.txt
+            dist/homebrew/
+            dist/metadata.json
+          retention-days: 14

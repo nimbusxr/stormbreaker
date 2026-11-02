@@ -1,0 +1,5 @@
+data:
+  sender: kestrel-books
+  serviceLevel: STANDARD
+  recipient:
+    country: DE

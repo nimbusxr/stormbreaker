@@ -1,0 +1,25 @@
+---
+// A run through an environment, phase by phase (scenes.ts).
+import AsciiDiagram from './AsciiDiagram.astro';
+import { DIAGRAMS } from './descriptions';
+import { runTopology } from './scenes';
+
+interface Props {
+	caption?: string;
+}
+const { caption = 'The suite never runs in the cluster, and no component touches another team’s data: each dispatcher prepares and cleans up only its own.' } = Astro.props;
+---
+
+<AsciiDiagram
+	name="a run, phase by phase"
+	scene={runTopology}
+	title={DIAGRAMS.RunTopology.title}
+	text={DIAGRAMS.RunTopology.text}
+	caption={caption}
+	legend={[
+		{ kind: 'coord', label: 'to the orchestrator' },
+		{ kind: 'notify', label: 'notifications' },
+		{ kind: 'traffic', label: 'traffic' },
+		{ kind: 'own', label: 'a team’s own data' },
+	]}
+/>

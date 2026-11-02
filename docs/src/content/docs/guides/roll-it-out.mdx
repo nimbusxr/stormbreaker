@@ -1,0 +1,71 @@
+---
+title: Roll it out
+description: Adopt stormbreaker one step at a time, from one team load testing its own application alone to every flow in every shared environment.
+---
+
+import Rollout from '../../../components/diagrams/Rollout.astro';
+
+Stormbreaker works for one team, alone, in a QA or staging environment. Every later step adds teams, and none changes what came before.
+
+<Rollout />
+
+## 1. One team, alone
+
+1. **Run the orchestrator in your own namespace**, with a token ([deploy the orchestrator](/guides/deploy-the-orchestrator/)).
+2. **Make a group of your own.** A dispatcher's joining makes one; without a dispatcher, make it once:
+
+   ```sh
+   stormbreaker groups create parcels   # uses STORMBREAKER_ORCHESTRATOR_URL and STORMBREAKER_TOKEN
+   ```
+
+3. **Add a dispatcher for your application** ([write a dispatcher](/guides/write-a-dispatcher/)), so that something removes what the traffic created. Without one, the run, the load and the SLO checks all work, but your data stays. Join your group and require yourself:
+
+   ```sh
+   STORMBREAKER_DISPATCHER=parcels
+   STORMBREAKER_INSTANCE=east        # stable: the region, never the pod's name
+   STORMBREAKER_GROUPS=parcels
+   ```
+
+   ```gherkin
+   @stormbreaker-group/parcels @stormbreaker-requires/parcels
+   Feature: Parcels hold their load
+   ```
+
+4. **Keep your traffic away from your neighbors.** Point the services your application calls at mocks of them ([mock partners](/guides/mock-partners/)). What a mock's stubs do not match passes through to the real one, so traffic outside your tests still reaches it. Publish your events to a topic of your own.
+5. **Run it and read the journal**: what was declared, who prepared, what was removed. The first few times, check by hand that nothing is left.
+
+## 2. A second team
+
+When the team downstream wants in:
+
+- **Move the orchestrator to whoever will own it for the environment**, usually a platform team. Once two teams share an environment, it has one orchestrator.
+- **Make a group for the flow**, such as `delivery`, and have both dispatchers join it. Keep the first team's own group for runs that should reach only its application.
+- **Replace the mock** of the team that now takes part with the real service, and require both: `@stormbreaker-requires/parcels,tracking`.
+- **Practice the failures** ([in an organization](/explanations/organization/#when-things-fail)): kill the suite mid-run (the run is abandoned after 30 s and cleaned up), restart a dispatcher mid-cleanup (it picks the run up again), and take the orchestrator down for a minute (runs carry on when it returns).
+
+## 3. The whole flow
+
+- **Every team on the path that keeps data takes part, or is stood in for**, including every consumer of every topic the traffic reaches.
+- **An instance per region:** `east`, `west`.
+- **A perf environment**, if load tests and everyday work should not share one, with its own orchestrator, dispatchers and token.
+- **SLO checks** over the run's window ([check SLOs](/guides/check-slos/)).
+- **Schedule load tests that share services.** Runs that share a dispatcher never overlap: the second waits its turn. Runs in groups with nothing in common do run side by side, and an SLO check on a service both reach sees both runs' load. Use a calendar, or a CI concurrency group per environment.
+
+## 4. The organization
+
+- **A group per flow**, joined by the dispatchers of the applications in it.
+- **One orchestrator per environment, owned by the platform team**, who back it up and upgrade it before the dispatchers ([operating it](/explanations/organization/#operating-it)).
+- **A dispatcher's name is its application's, held by one team.** While its instances are live, another team registering it is refused (`409`).
+- **Read every run that did not pass.** Its journal names each instance that did not complete. Within 72 hours of closing (`--footprint-retention`), the run's claims are at `GET /runs/{id}/footprint/claims` for a small run, or a page at a time at `GET /runs/{id}/footprint`; after that, `stormbreaker streams ids` regenerates the suite's identities.
+
+## A team joining: the checklist
+
+- [ ] The dispatcher is named for the application.
+- [ ] Each instance has a stable name, a region or partition, in `STORMBREAKER_INSTANCE`, and runs as one process.
+- [ ] It joins the groups of its flows (`STORMBREAKER_GROUPS`).
+- [ ] The orchestrator can reach its port through its namespace's NetworkPolicy.
+- [ ] `Prepare` declares a pure function of what it walks, in the same order each round.
+- [ ] `Cleanup` is idempotent, removes only the team's own records, and checks they are gone before reporting them.
+- [ ] Records it cannot remove on demand get a clean-by date ([clean up later](/guides/clean-up-later/)).
+- [ ] A consumer it waits for has a grace it can keep.
+- [ ] Its dispatcher-sdk is on the orchestrator's release.

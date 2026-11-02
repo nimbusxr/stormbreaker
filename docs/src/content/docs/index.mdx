@@ -1,0 +1,134 @@
+---
+title: Operational acceptance testing in shared environments
+description: Stormbreaker is an open-source framework for smoke and load tests in shared environments, where every team answers for the data its systems create. Built on axx.
+template: splash
+editUrl: false
+pagefind: false
+head:
+  - tag: title
+    content: stormbreaker — Operational acceptance testing in shared environments
+eyebrow: Smoke and load tests, built on axx
+hero:
+  title: Break it on purpose. <span>Leave nothing behind.</span>
+  tagline: |-
+    Stormbreaker is an open-source framework for operational acceptance testing: smoke and load tests in the shared environments where teams' services really meet, without one team's test leaving another team's data behind.
+
+    Declare the load. Let every team prepare and clean up its own. Judge the run honestly.
+  actions:
+    - text: Get started
+      link: tutorials/quickstart/
+    - text: Why stormbreaker
+      link: explanations/why-stormbreaker/
+    - text: GitHub
+      link: https://github.com/nimbusxr/stormbreaker
+      variant: minimal
+---
+
+import Feature from '../../components/home/Feature.astro';
+import FeatureGrid from '../../components/home/FeatureGrid.astro';
+import Flow from '../../components/home/Flow.astro';
+import FlowStep from '../../components/home/FlowStep.astro';
+import HomeCta from '../../components/home/HomeCta.astro';
+import RunTopology from '../../components/diagrams/RunTopology.astro';
+
+## Some questions only a real environment answers.
+
+Does the service hold its load? Is it alive and wired after this rollout? What happens when a partner slows down? Unit and functional tests cannot say: they run where feedback is fast, not where the services meet. These questions can only be answered in a shared environment, among other teams' services and data. That makes the hard part what a test leaves behind there.
+
+**The challenge isn't sending load. It's sending it where everyone lives, and answering for every record it creates.**
+
+## Every run answers for what it creates.
+
+<FeatureGrid columns={3}>
+<Feature title="Declared before it's sent" href="/explanations/run-lifecycle/" link="The run lifecycle">
+A run declares every identity its traffic will create before any of it is sent. Teams downstream see it coming and prepare. The run's readiness gate holds the traffic until they have.
+</Feature>
+<Feature title="Cleaned up by the owners" href="/guides/write-a-dispatcher/" link="Write a dispatcher">
+Each team's dispatcher cleans up what its own systems created, with its own tools, and proves it. No component ever touches another team's data. A run passes only when every dispatcher has answered for what it claimed: removed and verified, or promised clean by a date.
+</Feature>
+<Feature title="Judged honestly" href="/explanations/measurement-honesty/" link="Measurement honesty">
+Load is open-model: a slow service gets the same arrivals, not fewer. Percentiles come from merged histogram buckets across every region and are never averaged. A window too short to judge is refused.
+</Feature>
+</FeatureGrid>
+
+## A run, from the suite's side.
+
+<Flow>
+<FlowStep title="Open">
+A scenario tagged with a group opens a run on the environment's orchestrator, and every dispatcher in the group hears of it.
+</FlowStep>
+<FlowStep title="Declare">
+Binding a stream declares every identity its records will create. Dispatchers derive what their own systems will create from it, and prepare.
+</FlowStep>
+<FlowStep title="Drive">
+Once the readiness gate opens, the traffic goes out at the declared rate, through the real front door or a real topic. The client's view is recorded.
+</FlowStep>
+<FlowStep title="Judge and clean">
+SLOs are checked across regions over the run's window. Then every dispatcher cleans up what it claimed, and the run's journal tells the whole story.
+</FlowStep>
+</Flow>
+
+Here is the same run, through an environment. Each phase lights the paths it uses.
+
+<RunTopology />
+
+Your applications do not change: stormbreaker sits [around them](/explanations/around-your-applications/), and any team can take part on its own. [Draw your own environment](/guides/see-your-topology/) to see it with stormbreaker on top.
+
+## A load test you can read.
+
+```gherkin title="features/load/parcels-load.feature"
+@stormbreaker-group/delivery @stormbreaker-requires/parcels
+Feature: The parcels service holds its load
+
+  Scenario: The service's own metrics agree, across both regions
+    Given the parcels service with the following properties:
+      | url | ${sys:parcels.url} |
+    And the parcels-metrics prometheus service with the following properties:
+      | url            | ${sys:prometheus.urls} |
+      | selector       | job="parcels"          |
+      | minimum-window | 10s                    |
+    And the parcels stream of POST requests to /parcels
+    When the parcels stream is sent at 25 requests per second
+    And the run's traffic is complete
+    Then within 30s the increase of http_server_requests_seconds_count over the run is at least 200
+    And within 30s the p99 of http_server_requests_seconds over the run is at most 0.5 seconds
+```
+
+It is an axx scenario: stormbreaker's steps are axx packs, beside axx's own. The `parcels` stream is data: a count, and a weighted mix of fixtures from axx's fixture factories. Its records are generated the same way every time, so a run's footprint can be recomputed days later. The [lab](https://github.com/nimbusxr/stormbreaker/tree/main/examples) runs suites like this one against two teams' services.
+
+## What it is made of.
+
+<FeatureGrid columns={2}>
+<Feature title="An orchestrator per environment" href="/guides/deploy-the-orchestrator/" link="Deploy the orchestrator">
+One small service coordinates runs: who takes part, the readiness gate, the footprint every run answers for, signed notifications, leases, and a journal of every run.
+</Feature>
+<Feature title="A dispatcher per team app" href="/guides/write-a-dispatcher/" link="Write a dispatcher">
+The dispatcher-sdk owns the protocol. A team writes two hooks: what to prepare from a run's footprint, and how to clean up and prove it.
+</Feature>
+<Feature title="Streams of looks-real data" href="/guides/define-streams/" link="Define streams">
+Volume data from your fixture factories, with identities derived per record as ordinary UUIDs, deterministic, and recomputable forever.
+</Feature>
+<Feature title="Load, metrics and mocks" href="/guides/drive-rest-load/" link="Drive REST load">
+REST and Kafka load at a declared rate, SLO checks across Prometheus regions, and partners nobody owns mocked with [axx's WireMock image](/guides/mock-partners/).
+</Feature>
+</FeatureGrid>
+
+## Sized for a whole environment.
+
+<FeatureGrid columns={3}>
+<Feature title="Thousands of runs an hour" href="/explanations/scale/" link="Scale">
+One orchestrator on 2 CPUs ran 7,200 smoke runs at an hour's pace in testing, every one clean, adding under a second to each. Plan on 2,400 an hour.
+</Feature>
+<Feature title="A billion identities in one run" href="/explanations/scale/" link="Scale">
+Every identity a run creates is declared before it is sent and answered for after, a page at a time, without holding the run in memory.
+</Feature>
+<Feature title="Over 100,000 requests a second" href="/explanations/scale/" link="Scale">
+From one CI runner, at the declared rate: 140,000 HTTP requests a second, or 200,000 Kafka events.
+</Feature>
+</FeatureGrid>
+
+<HomeCta primary="Run the lab" primaryHref="/tutorials/quickstart/" secondary="Explore the documentation" secondaryHref="/explanations/why-stormbreaker/" />
+
+Stormbreaker is open source (Apache-2.0) and in beta (`v0.x`): interfaces may change before `v1.0.0`.
+
+**For coding agents:** every page has a Markdown twin (add `.md` to its path), [llms.txt](/llms.txt) lists them, and a pack's steps are at `/references/packs/<pack>.md`.

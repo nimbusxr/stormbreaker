@@ -1,0 +1,109 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+project_name: stormbreaker
+# Always GitHub, whatever tokens the environment holds.
+force_token: github
+# Releases are the v* tags. Builds without a release tag set GORELEASER_CURRENT_TAG to the newest
+# v* tag (see scripts/cli-tag.sh).
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: stormbreaker
+    main: ./cmd/stormbreaker
+    binary: stormbreaker
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -X github.com/nimbusxr/stormbreaker/internal/version.Version={{ .Version }}
+      - -X github.com/nimbusxr/stormbreaker/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/nimbusxr/stormbreaker/internal/version.Date={{ .CommitDate }}
+
+archives:
+  - id: stormbreaker
+    name_template: "stormbreaker_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, NOTICE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args: [sign-blob, "--bundle=${signature}", "${artifact}", --yes]
+
+dockers_v2:
+  # The version without the v: 0.1.0, 0.1 and latest.
+  - id: orchestrator
+    images: [ghcr.io/nimbusxr/stormbreaker-orchestrator]
+    tags: ["{{ .Version }}", "{{ .Major }}.{{ .Minor }}", "{{ if not .IsSnapshot }}latest{{ end }}"]
+    platforms: [linux/amd64, linux/arm64]
+    dockerfile: build/orchestrator.Dockerfile
+    labels:
+      org.opencontainers.image.source: https://github.com/nimbusxr/stormbreaker
+      org.opencontainers.image.description: The stormbreaker orchestrator, one per shared environment
+      org.opencontainers.image.licenses: Apache-2.0
+  - id: dispatcher
+    images: [ghcr.io/nimbusxr/stormbreaker-dispatcher]
+    tags: ["{{ .Version }}", "{{ .Major }}.{{ .Minor }}", "{{ if not .IsSnapshot }}latest{{ end }}"]
+    platforms: [linux/amd64, linux/arm64]
+    dockerfile: build/dispatcher.Dockerfile
+    labels:
+      org.opencontainers.image.source: https://github.com/nimbusxr/stormbreaker
+      org.opencontainers.image.description: The stormbreaker dispatcher, the base image teams build theirs from
+      org.opencontainers.image.licenses: Apache-2.0
+  - id: ui
+    images: [ghcr.io/nimbusxr/stormbreaker-ui]
+    tags: ["{{ .Version }}", "{{ .Major }}.{{ .Minor }}", "{{ if not .IsSnapshot }}latest{{ end }}"]
+    platforms: [linux/amd64, linux/arm64]
+    dockerfile: build/ui.Dockerfile
+    labels:
+      org.opencontainers.image.source: https://github.com/nimbusxr/stormbreaker
+      org.opencontainers.image.description: The stormbreaker UI, beside an environment's orchestrator
+      org.opencontainers.image.licenses: Apache-2.0
+
+homebrew_casks:
+  - name: stormbreaker
+    binaries: [stormbreaker]
+    homepage: https://stormbreaker.nimbusxr.us
+    description: Operational acceptance testing in shared environments
+    license: Apache-2.0
+    skip_upload: auto
+    # The binaries are not notarized yet, so macOS would refuse to run them: drop the
+    # quarantine flag Homebrew sets on download.
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/stormbreaker"]
+          end
+    repository:
+      owner: nimbusxr
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+
+release:
+  github:
+    owner: nimbusxr
+    name: stormbreaker
+  # release-please creates the GitHub release and notes; we only attach assets.
+  mode: keep-existing
+  # every 0.x release is a GitHub pre-release until v1.0.0
+  prerelease: "true"
+
+changelog:
+  disable: true

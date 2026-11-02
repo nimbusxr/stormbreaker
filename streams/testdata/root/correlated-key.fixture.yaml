@@ -1,0 +1,5 @@
+factory: parcel
+# A key record for a value stream generated alongside this one. Nothing references anything: both
+# streams derive the same identifier because the instance is the same run, key and position.
+data:
+  reference: ${ uuid("parcel") }

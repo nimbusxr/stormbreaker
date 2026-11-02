@@ -1,0 +1,115 @@
+#!/bin/sh
+# Install stormbreaker: https://stormbreaker.nimbusxr.us
+#
+#   curl -fsSL https://stormbreaker.nimbusxr.us/install.sh | sh
+#
+# Environment:
+#   STORMBREAKER_VERSION      version to install (e.g. 0.1.0, v0.1.0, nightly); default: newest release
+#   STORMBREAKER_INSTALL_DIR  where to put the binary; default: /usr/local/bin if writable, else ~/.local/bin
+#   GITHUB_TOKEN     optional, avoids GitHub API rate limits
+#
+# Releases are GitHub pre-releases during the 0.x beta, so the newest release
+# is resolved from the releases list (GitHub's /latest skips pre-releases).
+set -eu
+
+REPO="nimbusxr/stormbreaker"
+API="https://api.github.com/repos/$REPO"
+
+say() { printf 'stormbreaker-install: %s\n' "$*" >&2; }
+die() { say "error: $*"; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
+
+need uname
+need tar
+if command -v curl >/dev/null 2>&1; then
+  fetch() { curl -fsSL ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} "$1"; }
+  download() { curl -fsSL -o "$2" "$1"; }
+elif command -v wget >/dev/null 2>&1; then
+  fetch() { wget -qO- ${GITHUB_TOKEN:+--header="Authorization: Bearer $GITHUB_TOKEN"} "$1"; }
+  download() { wget -qO "$2" "$1"; }
+else
+  die "curl or wget is required"
+fi
+
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
+case "$os" in
+  linux|darwin) ;;
+  msys*|mingw*|cygwin*) die "on Windows, download the zip from https://github.com/$REPO/releases" ;;
+  *) die "unsupported OS: $os" ;;
+esac
+arch=$(uname -m)
+case "$arch" in
+  x86_64|amd64) arch=amd64 ;;
+  arm64|aarch64) arch=arm64 ;;
+  *) die "unsupported architecture: $arch" ;;
+esac
+
+version=${STORMBREAKER_VERSION:-}
+if [ -z "$version" ]; then
+  # The newest release (pre-releases included) whose files are up: its checksums and this
+  # platform's archive. A release is published before its build uploads them, so the newest
+  # one can have none yet. Release tags are v*; nightly is the rolling build of main.
+  version=$(fetch "$API/releases?per_page=20" | tr ',' '\n' |
+    sed -n 's#.*"browser_download_url": *"[^"]*/releases/download/\(v[0-9][^/"]*\)/\([^/"]*\)".*#\1 \2#p' |
+    awk -v os="$os" -v arch="$arch" '
+      $2 == "checksums.txt" { sums[$1] = 1 }
+      $2 == "stormbreaker_" substr($1, 2) "_" os "_" arch ".tar.gz" { archive[$1] = 1 }
+      sums[$1] && archive[$1] { print $1; exit }')
+  [ -n "$version" ] || die "no release has a build for $os/$arch yet; set STORMBREAKER_VERSION"
+fi
+case "$version" in
+  nightly) tag=nightly ;;
+  v*) tag=$version; version=${version#v} ;;
+  *) tag=v$version ;;
+esac
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+base="https://github.com/$REPO/releases/download/$tag"
+download "$base/checksums.txt" "$tmp/checksums.txt" || die "download failed: $base/checksums.txt"
+if [ "$tag" = nightly ]; then
+  # The nightly's archives are named after its build (stormbreaker_0.1.0-SNAPSHOT-<commit>_...), and
+  # the release can keep older builds' archives: take the one its checksums list.
+  archive=$(awk '{print $2}' "$tmp/checksums.txt" | grep "^stormbreaker_.*_${os}_${arch}\.tar\.gz\$" | head -n 1)
+  [ -n "$archive" ] || die "no nightly build for $os/$arch"
+else
+  archive="stormbreaker_${version}_${os}_${arch}.tar.gz"
+fi
+
+say "downloading $archive ($tag)"
+download "$base/$archive" "$tmp/$archive" || die "download failed: $base/$archive"
+
+expected=$(grep " $archive\$" "$tmp/checksums.txt" | awk '{print $1}')
+[ -n "$expected" ] || die "$archive is not listed in checksums.txt"
+if command -v sha256sum >/dev/null 2>&1; then
+  actual=$(sha256sum "$tmp/$archive" | awk '{print $1}')
+else
+  actual=$(shasum -a 256 "$tmp/$archive" | awk '{print $1}')
+fi
+[ "$expected" = "$actual" ] || die "checksum mismatch for $archive"
+say "checksum verified"
+
+# The release attests its archives; the nightly is not attested.
+if command -v gh >/dev/null 2>&1 && [ "$tag" != nightly ]; then
+  if gh attestation verify "$tmp/$archive" --repo "$REPO" >/dev/null 2>&1; then
+    say "build provenance verified (gh attestation)"
+  else
+    say "note: could not verify build provenance with gh (continuing; checksum matched)"
+  fi
+fi
+
+tar -xzf "$tmp/$archive" -C "$tmp" stormbreaker
+dir=${STORMBREAKER_INSTALL_DIR:-}
+if [ -z "$dir" ]; then
+  if [ -w /usr/local/bin ]; then dir=/usr/local/bin; else dir="$HOME/.local/bin"; fi
+fi
+mkdir -p "$dir"
+install -m 0755 "$tmp/stormbreaker" "$dir/stormbreaker" 2>/dev/null || { cp "$tmp/stormbreaker" "$dir/stormbreaker" && chmod 0755 "$dir/stormbreaker"; }
+
+say "installed $("$dir/stormbreaker" version 2>/dev/null || echo stormbreaker) to $dir/stormbreaker"
+case ":$PATH:" in
+  *":$dir:"*) ;;
+  *) say "add $dir to your PATH, e.g.: export PATH=\"$dir:\$PATH\"" ;;
+esac
+say "docs: https://stormbreaker.nimbusxr.us"

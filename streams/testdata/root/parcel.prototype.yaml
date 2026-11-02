@@ -1,0 +1,11 @@
+# What every parcel record shares, including how its identity is made.
+data:
+  reference: ${ uuid("parcel") }
+  country: DE
+  serviceLevel: STANDARD
+metadata:
+  # Keyed by its own parcel. The trace is shared by whatever the key is and each message names
+  # its own span, so what a series shares - and what it does not - is written here.
+  key:
+    $ref: "#/reference"
+  trace: ${ traceparent($metadata.key, "registered") }

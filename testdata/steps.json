@@ -1,0 +1,132 @@
+[
+  {
+    "pack": "stormbreaker-core",
+    "id": "stormbreaker.run.ready",
+    "expr": "the run is ready"
+  },
+  {
+    "pack": "stormbreaker-core",
+    "id": "stormbreaker.run.traffic-complete",
+    "expr": "the run's traffic is complete"
+  },
+  {
+    "pack": "stormbreaker-kafka",
+    "id": "stormbreaker.kafka.caught-up",
+    "expr": "the {word} consumer group catches up on the {word} topic within {duration}[[ on the {word} kafka service]]"
+  },
+  {
+    "pack": "stormbreaker-kafka",
+    "id": "stormbreaker.kafka.identified.header",
+    "expr": "the {word} kafka events are identified by the header {word}"
+  },
+  {
+    "pack": "stormbreaker-kafka",
+    "id": "stormbreaker.kafka.identified.payload",
+    "expr": "the {word} kafka events are identified by the payload {word}"
+  },
+  {
+    "pack": "stormbreaker-kafka",
+    "id": "stormbreaker.kafka.no-failures",
+    "expr": "the publish completes with no failed events"
+  },
+  {
+    "pack": "stormbreaker-kafka",
+    "id": "stormbreaker.kafka.stream",
+    "expr": "the {word} stream of {word} kafka events[[ on the {word} kafka service]]"
+  },
+  {
+    "pack": "stormbreaker-kafka",
+    "id": "stormbreaker.kafka.stream.headers",
+    "expr": "the {word} stream kafka event headers are the {word} metadata"
+  },
+  {
+    "pack": "stormbreaker-kafka",
+    "id": "stormbreaker.kafka.stream.keys",
+    "expr": "the {word} stream kafka event keys are the {word} metadata"
+  },
+  {
+    "pack": "stormbreaker-kafka",
+    "id": "stormbreaker.kafka.stream.publish",
+    "expr": "the {word} stream is published at {int} events per second"
+  },
+  {
+    "pack": "stormbreaker-kafka",
+    "id": "stormbreaker.kafka.stream.publish.schema",
+    "expr": "the {word} stream is published using schema {filepath} at {int} events per second"
+  },
+  {
+    "pack": "stormbreaker-prometheus",
+    "id": "stormbreaker.prometheus.increase",
+    "expr": "within {duration} the increase of {word} over the run[[ on {prometheusService}]] is at least {float}"
+  },
+  {
+    "pack": "stormbreaker-prometheus",
+    "id": "stormbreaker.prometheus.quantile",
+    "expr": "within {duration} the {quantile} of {word} over the run[[ on {prometheusService}]] is at most {float} seconds"
+  },
+  {
+    "pack": "stormbreaker-prometheus",
+    "id": "stormbreaker.prometheus.service",
+    "expr": "the {word} prometheus service with the following properties:"
+  },
+  {
+    "pack": "stormbreaker-rest",
+    "id": "stormbreaker.rest.client-quantile",
+    "expr": "the client's {word} latency of the load is at most {float} seconds"
+  },
+  {
+    "pack": "stormbreaker-rest",
+    "id": "stormbreaker.rest.identified",
+    "expr": "the requests[[ on {service}]] are identified by {word}"
+  },
+  {
+    "pack": "stormbreaker-rest",
+    "id": "stormbreaker.rest.no-failures",
+    "expr": "the load completes with no failed requests"
+  },
+  {
+    "pack": "stormbreaker-rest",
+    "id": "stormbreaker.rest.send",
+    "expr": "{int} {word} requests are sent to {word} at {int} requests per second[[ on {service}]]"
+  },
+  {
+    "pack": "stormbreaker-rest",
+    "id": "stormbreaker.rest.stream",
+    "expr": "the {word} stream of {word} requests to {word}[[ on {service}]]"
+  },
+  {
+    "pack": "stormbreaker-rest",
+    "id": "stormbreaker.rest.stream.execute",
+    "expr": "the {word} stream is sent at {int} requests per second"
+  },
+  {
+    "pack": "stormbreaker-rest",
+    "id": "stormbreaker.rest.stream.header",
+    "expr": "the {word} stream header {word} is {string}"
+  },
+  {
+    "pack": "stormbreaker-rest",
+    "id": "stormbreaker.rest.stream.headers",
+    "expr": "the {word} stream headers are the {word} metadata"
+  },
+  {
+    "pack": "stormbreaker-rest",
+    "id": "stormbreaker.rest.stream.path-variable",
+    "expr": "the {word} stream path variable {word} is {string}"
+  },
+  {
+    "pack": "stormbreaker-rest",
+    "id": "stormbreaker.rest.stream.path-variables",
+    "expr": "the {word} stream path variables are the {word} metadata"
+  },
+  {
+    "pack": "stormbreaker-rest",
+    "id": "stormbreaker.rest.stream.query-parameter",
+    "expr": "the {word} stream query parameter {word} is {string}"
+  },
+  {
+    "pack": "stormbreaker-rest",
+    "id": "stormbreaker.rest.stream.query-parameters",
+    "expr": "the {word} stream query parameters are the {word} metadata"
+  }
+]

@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: postgres, namespace: stormbreaker-lab}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: postgres}}
+  template:
+    metadata: {labels: {app: postgres}}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - {name: POSTGRES_USER, value: tracking}
+            - {name: POSTGRES_PASSWORD, value: lab-only-password}
+            - {name: POSTGRES_DB, value: tracking}
+          readinessProbe: {exec: {command: [pg_isready, -U, tracking]}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: postgres, namespace: stormbreaker-lab}
+spec:
+  selector: {app: postgres}
+  ports: [{port: 5432, targetPort: 5432}]

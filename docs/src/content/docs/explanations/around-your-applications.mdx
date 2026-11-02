@@ -1,0 +1,48 @@
+---
+title: Around your applications
+description: Stormbreaker is not a multi-tenant platform. It wraps the applications an environment already runs, and asks nothing of them. Why that fits shared environments, and how it compares with the other ways.
+---
+
+import AroundTheApps from '../../../components/diagrams/AroundTheApps.astro';
+
+Stormbreaker is not a platform your applications move onto. It wraps the applications an environment already runs, and they do not know it is there:
+
+- **The suite** sends ordinary requests and events from the CI runner, through the same front doors everyone uses.
+- **The orchestrator**, one per environment, keeps track of the runs.
+- **A dispatcher** beside each application taking part prepares and cleans up through the doors the team already has: its admin API, its database, its tools.
+- **Mocks** stand in for whoever is not taking part.
+
+<AroundTheApps />
+
+## Why this design
+
+- **No application changes.** No SDK, test flag, tenant column or special header goes into an application. Its test data is real data, created on the paths production takes.
+- **No infrastructure changes beyond mocks.** Deployments, stores, topics and configuration stay as they are. Stormbreaker adds an orchestrator, a dispatcher per participating app, and mocks.
+- **Each team keeps its own data.** Only a team's dispatcher touches its stores. The orchestrator holds identities and where they are, never payloads.
+- **Taking part is optional.** One team can load test alone ([roll it out](/guides/roll-it-out/)); another joins by deploying a dispatcher, and leaves by deleting it.
+
+It asks two things. What a run creates must be traceable from what the suite sends: the suite declares identities from its records, such as a parcel's reference, and dispatchers derive the rest. And a participating team needs a way to remove its records, or to promise a date when they will be gone ([clean up later](/guides/clean-up-later/)).
+
+## Mocks stand in for more than partners
+
+A mock can stand in for a partner nobody owns ([mock partners](/guides/mock-partners/)), and just as well for a team that is not taking part: point the dependency's URL at a mock of the neighbor, and the neighbor never sees the run. Either way the mock is a proxy too: what its stubs do not match falls through to the real one, so the URL stays pointed at it, and traffic outside your tests goes where it always went. For a team that consumes its events, publish to a topic of its own in that environment, or have the consumer take part.
+
+On the lab, the parcels team ran alone with 250 parcels. Without a dispatcher and on the shared topic, it left 250 parcels in its stores and caused 250 tracking records in a team that took no part. With its own dispatcher and topic, it left nothing anywhere.
+
+## The other ways
+
+| Approach | What it costs | What it gets wrong for a shared environment |
+|---|---|---|
+| **A multi-tenant test platform** | every application integrates with it and becomes tenant-aware | every team's data model runs through one platform, and nothing moves until every application has integrated |
+| **Test flags or tenant columns** (`is_test`, a test header) | a change to every application, store and consumer | test traffic takes branches production never does, and one team that ignores the flag leaks |
+| **An ephemeral environment per test** | a whole stack per test, at load-test capacity | the other teams' real services and versions, the point of the test, are not there |
+| **A production-like sandbox** | a second production, and a copy of its data | it drifts from the shared environment |
+| **Resetting the environment** | a restore | it wipes every other team's work too |
+
+Each is right somewhere: ephemeral environments suit functional tests, and flags suit an application built for them. A shared environment is where the questions are operational, such as whether a service holds its load among the services it really meets. Answering them needs the environment as it is, with each team answering for its own data.
+
+## Where it fits less well
+
+- **Data nobody can trace back to a run.** No dispatcher can find it.
+- **Events on topics** stay until the topic's retention removes them.
+- **A team that will not take part and cannot be stood in for**, such as a consumer of a shared topic whose producer cannot publish elsewhere: the run reaches it.
