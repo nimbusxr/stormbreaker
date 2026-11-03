@@ -13,6 +13,9 @@ import (
 
 func TestBelowTheReserveGrowthIsRefusedAndCleanupGoesOn(t *testing.T) {
 	e := newEnv(t)
+	if _, ok := e.o.room(); !ok {
+		t.Skip("this platform can't say how much room its volume has, so the orchestrator keeps no reserve")
+	}
 	e.register("delivery", "parcels/east")
 	run := e.open("delivery")
 	e.footprint(run.ID, "suite/suite", expected("parcels", "/parcels", "p-1"))

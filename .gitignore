@@ -34,7 +34,6 @@ docs/.astro/
 docs/src/content/docs/references/_gen/
 docs/src/lib/_gen/
 docs/public/openapi/
-docs/public/install.sh
 
 # the UI's build tools
 ui/node_modules/

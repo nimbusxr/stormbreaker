@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install stormbreaker: https://stormbreaker.nimbusxr.us
 #
-#   curl -fsSL https://stormbreaker.nimbusxr.us/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/nimbusxr/stormbreaker/main/scripts/install.sh | sh
 #
 # Environment:
 #   STORMBREAKER_VERSION      version to install (e.g. 0.1.0, v0.1.0, nightly); default: newest release
