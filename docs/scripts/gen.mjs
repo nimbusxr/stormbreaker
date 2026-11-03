@@ -4,7 +4,6 @@
 //
 //   src/content/docs/references/_gen/   the packs' pages and the step index (internal/tools/docsgen)
 //   public/openapi/orchestrator.yaml   the orchestrator's OpenAPI document (api/)
-//   public/install.sh                  the installer (scripts/install.sh)
 //   src/lib/_gen/step-tokens.json      the parameter values of the docs' steps, for the site to
 //                                      color (none yet: the blocks are colored by their grammar)
 //
@@ -37,9 +36,6 @@ try {
 const openapiDir = path.join(docsDir, 'public/openapi');
 fs.mkdirSync(openapiDir, { recursive: true });
 fs.copyFileSync(path.join(repoDir, 'api/orchestrator.openapi.yaml'), path.join(openapiDir, 'orchestrator.yaml'));
-
-// The installer, served at the site's root: curl -fsSL https://stormbreaker.nimbusxr.us/install.sh | sh
-fs.copyFileSync(path.join(repoDir, 'scripts/install.sh'), path.join(docsDir, 'public/install.sh'));
 
 const tokensDir = path.join(docsDir, 'src/lib/_gen');
 fs.mkdirSync(tokensDir, { recursive: true });
