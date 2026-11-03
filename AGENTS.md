@@ -74,6 +74,9 @@ This file is for agents *contributing to stormbreaker*.
   - The site is an S3 bucket behind CloudFront (ADR 0028): `docs/cloudfront/router.js` gives agents a page's
     Markdown twin at its own address, and `docs/scripts/deploy.sh` publishes it from the docs workflow.
     `docs/public/webmcp.js` offers the docs to agents that browse them.
+- `scripts/install.sh`, `scripts/install.ps1`: the installers. People fetch them from GitHub, not from the site.
+  [setup-stormbreaker](https://github.com/nimbusxr/setup-stormbreaker), the GitHub Action, carries copies: a change
+  here is synced there.
 - `plugins/stormbreaker`, `.claude-plugin`: the skills for coding agents, as a Claude Code plugin.
 
 ## Rules
