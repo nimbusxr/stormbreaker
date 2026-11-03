@@ -1,13 +1,13 @@
 ---
 title: Install
-description: Install the stormbreaker command with Homebrew or the install script, the orchestrator's and dispatcher's images, and stormbreaker's packs for axx.
+description: Install the stormbreaker command with Homebrew, an install script from GitHub or a GitHub Action, the orchestrator's, dispatcher's and UI's images, and stormbreaker's packs for axx.
 ---
 
 Stormbreaker comes in three parts:
 
 - **packs** for axx, which a suite lists;
-- **two images**, the orchestrator and the dispatcher;
-- **a command**, `stormbreaker`, which serves both and works with streams.
+- **three images**, the orchestrator, the dispatcher and the UI;
+- **a command**, `stormbreaker`, which serves all three and works with streams.
 
 ## The packs
 
@@ -29,8 +29,9 @@ packs:
 
 - `ghcr.io/nimbusxr/stormbreaker-orchestrator`: one per shared environment ([deploy it](/guides/deploy-the-orchestrator/)).
 - `ghcr.io/nimbusxr/stormbreaker-dispatcher`: a dispatcher with no hooks, for an app with nothing to prepare or clean up. Teams with something to do build their own with the [dispatcher-sdk](/guides/write-a-dispatcher/).
+- `ghcr.io/nimbusxr/stormbreaker-ui`: optional, beside an environment's orchestrator ([watch runs in it](/guides/watch-in-the-ui/)).
 
-Both run as UID 1001, and under an arbitrary UID in group 0, as OpenShift runs them. Both trust only the public CAs; add yours in a Dockerfile of your own, `FROM` ours.
+All three run as UID 1001, and under an arbitrary UID in group 0, as OpenShift runs them. All three trust only the public CAs; add yours in a Dockerfile of your own, `FROM` ours.
 
 ## The command
 
@@ -40,10 +41,24 @@ With Homebrew, on macOS or Linux:
 brew install nimbusxr/tap/stormbreaker
 ```
 
-Or with the install script:
+Or with the install script, from stormbreaker's repository on GitHub:
 
 ```sh
-curl -fsSL https://stormbreaker.nimbusxr.us/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/nimbusxr/stormbreaker/main/scripts/install.sh | sh
+```
+
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/nimbusxr/stormbreaker/main/scripts/install.ps1 | iex
+```
+
+Both scripts download the newest release from GitHub and check it against its `checksums.txt`.
+
+In GitHub Actions ([run in CI](/guides/run-in-ci/)):
+
+```yaml
+- uses: nimbusxr/setup-stormbreaker@v0
 ```
 
 Or download a release from GitHub. `stormbreaker version` says which you have.
